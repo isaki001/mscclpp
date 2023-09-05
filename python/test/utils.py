@@ -102,7 +102,6 @@ class KernelBuilder:
         ]
         try:
             subprocess.run(command, capture_output=True, text=True, check=True)
-            self._run_command_with_retries(command)
             with open(f"{self._tempdir.name}/{output_file}", "rb") as f:
                 return f.read()
         except subprocess.CalledProcessError as e:
