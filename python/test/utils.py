@@ -2,15 +2,21 @@
 # Licensed under the MIT license.
 
 import ctypes
+import logging
 import os
+import random
 import struct
 import subprocess
 import tempfile
+import time
 from typing import Type
 
 from cuda import cuda, nvrtc, cudart
 import cupy as cp
 import numpy as np
+
+
+logging.basicConfig(level=logging.INFO)
 
 
 def _check_cuda_errors(result):
@@ -87,25 +93,57 @@ class KernelBuilder:
         minor = _check_cuda_errors(
             cudart.cudaDeviceGetAttribute(cudart.cudaDeviceAttr.cudaDevAttrComputeCapabilityMinor, device_id)
         )
-        command = [
-            "nvcc",
-            f"-std={std_version}",
-            "-ptx",
-            "-Xcompiler",
-            "-Wall,-Wextra",
-            f"-I{include_dir}",
-            f"{source_file}",
-            f"--gpu-architecture=compute_{major}{minor}",
-            f"--gpu-code=sm_{major}{minor},compute_{major}{minor}",
-            "-o",
-            f"{self._tempdir.name}/{output_file}",
-        ]
+        command = (
+            f"nvcc -std={std_version} -ptx -Xcompiler -Wall,-Wextra -I{include_dir} {source_file} "
+            f"--gpu-architecture=compute_{major}{minor} --gpu-code=sm_{major}{minor},compute_{major}{minor} "
+            f"-o {self._tempdir.name}/{output_file}"
+        )
+
+        # # Create program
+        with open("/root/mscclpp/python/test/sm_channel_test.cu", "rb") as f:
+            source = f.read()
+            err, prog = nvrtc.nvrtcCreateProgram(source, b"sm_channel_test.cu", 0, [], [])
+
+            # Compile program
+            opts = [b"--gpu-architecture=compute_80", f"-I{include_dir}".encode(), b"-I/usr/local/cuda/include", b"-std=c++17", b"-I/root/mscclpp/python/test", b"-default-device", b"-maxrregcount=128"]
+            err, = nvrtc.nvrtcCompileProgram(prog, len(opts), opts)
+            err, logSize = nvrtc.nvrtcGetProgramLogSize(prog)
+            log = b" " * logSize
+            nvrtc.nvrtcGetProgramLog(prog, log)
+            print(log)
+
+            # Get PTX from compilation
+            err, ptxSize = nvrtc.nvrtcGetPTXSize(prog)
+            ptx = b" " * ptxSize
+            err, = nvrtc.nvrtcGetPTX(prog, ptx)
+            nvrtc.nvrtcDestroyProgram(prog)
+            print(ptx)
+            return ptx
         try:
-            subprocess.run(command, capture_output=True, text=True, check=True)
+            self._run_command_with_retry(command)
             with open(f"{self._tempdir.name}/{output_file}", "rb") as f:
                 return f.read()
         except subprocess.CalledProcessError as e:
             raise RuntimeError("Compilation failed:", e.stderr, " ".join(command))
+
+
+    # This is a workaround for using subprocess in MPI environment.
+    # TODO(binyli): change nvcc change to nvrtc
+    def _run_command_with_retry(self, command, max_retries=3, min_delay=5, max_delay=30):
+        retries = 0
+        while retries <= max_retries:
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, check=True, bufsize=1, shell=True)
+                return result
+            except OSError as e:
+                retries += 1
+                delay = min(random.uniform(min_delay, min_delay + min_delay * retries), max_delay)
+                logging.warning(f"Command failed with error: {e}. Retrying in {delay} seconds...")
+                time.sleep(delay)
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError("Compilation failed:", e.stderr, command)
+        raise RuntimeError("Max retries reached. Command execution failed.")
+
 
     def get_compiled_kernel(self):
         return self._kernel

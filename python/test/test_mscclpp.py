@@ -313,7 +313,7 @@ def test_d2d_semaphores(mpi_group: MpiGroup):
     group.barrier()
 
 
-@parametrize_mpi_groups(2, 4, 8, 16)
+@parametrize_mpi_groups(1, 2, 4, 8, 16)
 @pytest.mark.parametrize("nelem", [2**i for i in [10, 15, 20]])
 @pytest.mark.parametrize("use_packet", [False, True])
 def test_sm_channels(mpi_group: MpiGroup, nelem: int, use_packet: bool):
