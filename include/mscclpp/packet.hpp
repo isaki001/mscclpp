@@ -4,6 +4,7 @@
 #ifndef MSCCLPP_PACKET_HPP_
 #define MSCCLPP_PACKET_HPP_
 
+#include <stdint.h>
 #include "poll.hpp"
 
 namespace mscclpp {
