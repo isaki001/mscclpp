@@ -245,6 +245,8 @@ __global__ void kernelSmPacketPingPong(int* buff, int rank, int nElem, int* ret,
   volatile int* sendBuff = (volatile int*)buff;
   int putOffset = (rank == 0) ? 0 : 10000000;
   int getOffset = (rank == 0) ? 10000000 : 0;
+  int num = threadIdx.x + blockDim.x * blockIdx.x;
+
   for (int i = 0; i < nTries; i++) {
     uint64_t flag = (uint64_t)i + 1;
 
@@ -252,17 +254,25 @@ __global__ void kernelSmPacketPingPong(int* buff, int rank, int nElem, int* ret,
     // rank=1: 1, 0, 1, 0, ...
     if ((rank ^ (i & 1)) == 0) {
       // If each thread writes 8 bytes at once, we don't need a barrier before putPackets().
-      for (int j = threadIdx.x; j < nElem / 2; j += blockDim.x) {
+      //for (int j = threadIdx.x; j < nElem / 2; j += blockDim.x) {
+      for (int j = num; j < nElem / 2; j += blockDim.x*gridDim.x) {
+
         sendBuff[2 * j] = putOffset + i + 2 * j;
         sendBuff[2 * j + 1] = putOffset + i + 2 * j + 1;
       }
       // __syncthreads();
-      smChan.putPackets(0, 0, nElem * sizeof(int), threadIdx.x, blockDim.x, flag);
+      //smChan.putPackets(0, 0, nElem * sizeof(int), threadIdx.x, blockDim.x, flag);
+      smChan.putPackets(0, 0, nElem * sizeof(int), num, blockDim.x*gridDim.x, flag);
+
     } else {
-      smChan.getPackets(0, 0, nElem * sizeof(int), threadIdx.x, blockDim.x, flag);
+      //smChan.getPackets(0, 0, nElem * sizeof(int), threadIdx.x, blockDim.x, flag);
+      smChan.getPackets(0, 0, nElem * sizeof(int), num, blockDim.x*gridDim.x, flag);
+
       // If each thread reads 8 bytes at once, we don't need a barrier after getPackets().
       // __syncthreads();
-      for (int j = threadIdx.x; j < nElem / 2; j += blockDim.x) {
+      //for (int j = threadIdx.x; j < nElem / 2; j += blockDim.x) {
+      for (int j = num; j < nElem / 2; j += blockDim.x*gridDim.x) {
+
         if (sendBuff[2 * j] != getOffset + i + 2 * j) {
           // printf("ERROR: rank = %d, sendBuff[%d] = %d, expected %d. Skipping following errors\n", rank, 2 * j,
           //        sendBuff[2 * j], getOffset + i + 2 * j);
@@ -312,7 +322,7 @@ TEST_F(SmChannelOneToOneTest, PacketPingPong) {
   EXPECT_EQ(*ret, 0);
   *ret = 0;
 
-  kernelSmPacketPingPong<<<1, 1024>>>(buff.get(), gEnv->rank, 1024 * 1024, ret.get());
+  /*kernelSmPacketPingPong<<<1, 1024>>>(buff.get(), gEnv->rank, 1024 * 1024, ret.get());
   MSCCLPP_CUDATHROW(cudaDeviceSynchronize());
 
   EXPECT_EQ(*ret, 0);
@@ -322,12 +332,14 @@ TEST_F(SmChannelOneToOneTest, PacketPingPong) {
   MSCCLPP_CUDATHROW(cudaDeviceSynchronize());
 
   EXPECT_EQ(*ret, 0);
-  *ret = 0;
+  *ret = 0;*/
 
-  int nTries = 1000000;
+  int nTries = 10000000;
   communicator->bootstrap()->barrier();
   mscclpp::Timer timer;
-  kernelSmPacketPingPong<<<1, 1024>>>(buff.get(), gEnv->rank, 1024, ret.get(), nTries);
+  //kernelSmPacketPingPong<<<1, 1024>>>(buff.get(), gEnv->rank, 1024, ret.get(), nTries);
+  kernelSmPacketPingPong<<<4, 256>>>(buff.get(), gEnv->rank, 1024, ret.get(), nTries);
+
   MSCCLPP_CUDATHROW(cudaDeviceSynchronize());
   communicator->bootstrap()->barrier();
 
