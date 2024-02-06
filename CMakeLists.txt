@@ -1,6 +1,9 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
 
+cmake_minimum_required(VERSION 3.25)
+project(mscclpp CXX)
+
 set(MSCCLPP_MAJOR "0")
 set(MSCCLPP_MINOR "4")
 set(MSCCLPP_PATCH "2")
@@ -8,10 +11,17 @@ set(MSCCLPP_PATCH "2")
 set(MSCCLPP_SOVERSION ${MSCCLPP_MAJOR})
 set(MSCCLPP_VERSION "${MSCCLPP_MAJOR}.${MSCCLPP_MINOR}.${MSCCLPP_PATCH}")
 
-cmake_minimum_required(VERSION 3.25)
-enable_language(CXX)
+#enable_language(CXX)
+#enable_language(HIPCC)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+
+include(CheckIncludeFiles)
+include(CheckSymbolExists)
+include(CheckCXXCompilerFlag)
+#include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
+#include(cmake/Generator.cmake)    # Configure functions that goes into RCCL
+
 
 # Options
 option(ENABLE_TRACE "Enable tracing" OFF)
@@ -21,6 +31,11 @@ option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 option(USE_CUDA "Use NVIDIA/CUDA." OFF)
 option(USE_ROCM "Use AMD/ROCm." OFF)
 option(BYPASS_GPU_CHECK "Bypass GPU check." OFF)
+
+check_cxx_compiler_flag("-mllvm --amdgpu-kernarg-preload-count=16" HAVE_KERNARG_PRELOAD)
+if (HAVE_KERNARG_PRELOAD)
+  message(STATUS "Kernarg preloading to SGPR enabled")
+endif()
 
 if(BYPASS_GPU_CHECK)
     if(USE_CUDA)
@@ -83,11 +98,13 @@ if(USE_CUDA)
 else()
     set(CMAKE_HIP_STANDARD 17)
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wall -Wextra")
-    project(mscclpp LANGUAGES CXX HIP)
+    #project(mscclpp LANGUAGES CXX HIP)
+    project(mscclpp LANGUAGES CXX)
 
     set(CMAKE_HIP_ARCHITECTURES gfx90a gfx941 gfx942)
 
-    set(GPU_LIBRARIES hip::host)
+    #set(GPU_LIBRARIES hip::host)
+    set(GPU_LIBRARIES hip::device)
     set(GPU_INCLUDE_DIRS ${hip_INCLUDE_DIRS})
 endif()
 
@@ -107,6 +124,10 @@ target_include_directories(mscclpp_obj
     ${NUMA_INCLUDE_DIRS})
 target_link_libraries(mscclpp_obj PRIVATE ${GPU_LIBRARIES} ${NUMA_LIBRARIES} ${IBVERBS_LIBRARIES} Threads::Threads)
 set_target_properties(mscclpp_obj PROPERTIES LINKER_LANGUAGE CXX POSITION_INDEPENDENT_CODE 1 VERSION ${MSCCLPP_VERSION} SOVERSION ${MSCCLPP_SOVERSION})
+#if (HAVE_KERNARG_PRELOAD)
+#       target_link_options(mscclpp_obj PRIVATE -Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16)
+#endif()
+
 if(USE_CUDA)
     target_compile_definitions(mscclpp_obj PRIVATE USE_CUDA)
 elseif(USE_ROCM)
@@ -118,14 +139,27 @@ endif()
 if(USE_NPKIT)
     target_compile_definitions(mscclpp_obj PRIVATE ENABLE_NPKIT)
 endif()
+if (HAVE_KERNARG_PRELOAD)
+	target_compile_options(mscclpp_obj PRIVATE -mllvm --amdgpu-kernarg-preload-count=16)
+	message(STATUS "Compilation done")
+endif()
+
 
 # libmscclpp
 add_library(mscclpp SHARED)
 target_link_libraries(mscclpp PUBLIC mscclpp_obj)
 set_target_properties(mscclpp PROPERTIES VERSION ${MSCCLPP_VERSION} SOVERSION ${MSCCLPP_SOVERSION})
+if (HAVE_KERNARG_PRELOAD)
+	target_link_options(mscclpp PUBLIC -Xlinker -mllvm=-amdgpu-kernarg-preload-count=16)
+endif()
+
 add_library(mscclpp_static STATIC)
 target_link_libraries(mscclpp_static PUBLIC mscclpp_obj)
+
 set_target_properties(mscclpp_static PROPERTIES VERSION ${MSCCLPP_VERSION} SOVERSION ${MSCCLPP_SOVERSION})
+if(HAVE_KERNARG_PRELOAD)
+	target_link_options(mscclpp_static PUBLIC -Xlinker -mllvm=-amdgpu-kernarg-preload-count=16)
+endif()
 
 add_subdirectory(include)
 add_subdirectory(src)
