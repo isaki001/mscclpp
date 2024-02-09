@@ -6,10 +6,12 @@ FetchContent_MakeAvailable(json)
 
 function(add_mscclpp_test_executable name sources)
     if(USE_ROCM)
-        set_source_files_properties(${sources} PROPERTIES LANGUAGE HIP)
+	    set_source_files_properties(${sources} PROPERTIES LANGUAGE CXX)
     endif()
     add_executable(${name} ${sources} common.cc)
+    target_compile_options(${name} PRIVATE -mllvm --amdgpu-kernarg-preload-count=16)
     target_link_libraries(${name} ${TEST_LIBS_COMMON} MPI::MPI_CXX nlohmann_json::nlohmann_json)
+    target_link_options(${name} PUBLIC -Xlinker -mllvm=-amdgpu-kernarg-preload-count=16)
     target_include_directories(${name} ${TEST_INC_COMMON})
 endfunction()
 
