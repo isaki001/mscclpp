@@ -231,7 +231,7 @@ void BaseTestEngine::runTest() {
   this->barrier();
   validateArgsForDeviceKernel(coll_->getKernelRestrictions(), args_.kernelNum, coll_->getParamBytes() / sizeof(int),
                               args_.totalRanks, args_.nRanksPerNode);
-  printf("Coll test setup done\n");
+  //printf("Coll test setup done\n");
 
   for (int iter = 0; iter < warmup_iters; iter++) {
     this->coll_->runColl(args_, stream_);
@@ -371,7 +371,7 @@ void BaseTestEngine::setupMeshConnectionsInternal(
   const mscclpp::Transport ibTransport = IBs[args_.gpuNum];
   std::vector<mscclpp::NonblockingFuture<std::shared_ptr<mscclpp::Connection>>> connectionFutures;
 
-  printf("In mesh connection internal\n");
+  //printf("In mesh connection internal\n");
   auto rankToNode = [&](int rank) { return rank / nRanksPerNode; };
   for (int r = 0; r < worldSize; r++) {
     if (r == rank) {
@@ -380,7 +380,7 @@ void BaseTestEngine::setupMeshConnectionsInternal(
     if (addConnections) {
       mscclpp::Transport transport;
       if (rankToNode(r) == thisNode) {
-	      printf("cuda transport\n");
+	      //printf("cuda transport\n");
         transport = mscclpp::Transport::CudaIpc;
       } else {
         transport = ibTransport;
@@ -445,7 +445,7 @@ void BaseTestEngine::setupMeshConnections(std::vector<mscclpp::SmChannel>& smCha
     outputBufRegMem = comm_->registerMemory(outputBuff, outputBuffBytes, allTransports);
   }
 
-  printf("In smchannel mesh\n");
+  //printf("In smchannel mesh\n");
   std::vector<std::shared_ptr<mscclpp::Connection>> connections;
   std::vector<mscclpp::NonblockingFuture<mscclpp::RegisteredMemory>> remoteRegMemories;
   mscclpp::RegisteredMemory& localRegMemory =
@@ -711,10 +711,10 @@ void run(int argc, char* argv[]) {
   testEngine->bootstrap();
   testEngine->allocateBuffer();
   PRINT("# Setting up the connection in MSCCL++\n");
-  printf("Going to setup proxy\n");
+  //printf("Going to setup proxy\n");
   testEngine->setupTest();
   testEngine->barrier();
-  printf("Going to run test\n");
+  //printf("Going to run test\n");
 
   testEngine->runTest();
 

@@ -1082,13 +1082,13 @@ __global__ void allreduce7(int* buff, int* scratch, void* resultBuff, int rank, 
     }
   }
   // step 3: get data result from scratch buffer
-  /*mscclpp::LLPacket2* dstPkt = (mscclpp::LLPacket2*)((char*)scratch + scratchResultOffset);
+  mscclpp::LLPacket2* dstPkt = (mscclpp::LLPacket2*)((char*)scratch + scratchResultOffset);
   const int dstOffset = remoteRank * nPktsPerRank;
   uint32_t* result = (uint32_t*)((char*)resultBuff + remoteRank * nelemsPerRank * sizeof(int));
   for (int idx = threadIdx.x + localBlockIdx * blockDim.x; idx < nPktsPerRank; idx += blockDim.x * nBlocksPerPeer) {
     uint32_t data = dstPkt[idx + dstOffset].read(flag);
     result[idx] = data;
-  }*/
+  }
   //}
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     globalFlag += 1;
@@ -1139,9 +1139,17 @@ void AllReduceTestColl::runColl(const TestArgs& args, cudaStream_t stream) {
     tmpBuff = scratchPacketBuff;
     nThreadsPerBlock = 512;
   } else if (kernelNum == 7) {
-    nBlocks = 28;
+    /*nBlocks = 28;
+    nThreadsPerBlock = 1024;*/
     tmpBuff = scratchPacketBuff;
-    nThreadsPerBlock = 1024;
+
+    if (paramCount_ < 8192) {
+       nBlocks = 28;
+       nThreadsPerBlock = 1024;
+    } else {
+       nBlocks = 56;
+       nThreadsPerBlock = 512;
+    }
 
   }else {
     nBlocks = std::max(args.nRanksPerNode - 1, 1) * BLOCKS_PER_PEER;
@@ -1308,13 +1316,13 @@ void AllReduceTestEngine::setupConnections() {
     return std::transform(in.begin(), in.end(), out.begin(),
                           [](const mscclpp::SmChannel& smChannel) { return mscclpp::deviceHandle(smChannel); });
   };
-  printf("In setup connections\n");
+  //printf("In setup connections\n");
   if (isUsePacket()) {
     std::vector<DeviceHandle<mscclpp::SimpleProxyChannel>> proxyChannels;
 
     const size_t nPacket = (args_.maxBytes + sizeof(uint64_t) - 1) / sizeof(uint64_t);
     if (args_.kernelNum == 6 || args_.kernelNum == 7) {
-  	printf("In setup connections kernel 7\n");
+  	//printf("In setup connections kernel 7\n");
 
       const size_t scratchPacketBuffBytes = nPacket * 2 * 2 * sizeof(mscclpp::LLPacket);
       setupMeshConnections(smOutOfPlaceChannels_, inputBuff_.get(), args_.maxBytes, scratchPacketBuff_.get(),
