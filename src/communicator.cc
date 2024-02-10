@@ -27,7 +27,9 @@ MSCCLPP_API_CPP std::shared_ptr<Bootstrap> Communicator::bootstrap() { return pi
 MSCCLPP_API_CPP std::shared_ptr<Context> Communicator::context() { return pimpl_->context_; }
 
 MSCCLPP_API_CPP RegisteredMemory Communicator::registerMemory(void* ptr, size_t size, TransportFlags transports) {
-  return context()->registerMemory(ptr, size, transports);
+  if (context()) {	
+  	return context()->registerMemory(ptr, size, transports);
+  }
 }
 
 struct MemorySender : public Setuppable {

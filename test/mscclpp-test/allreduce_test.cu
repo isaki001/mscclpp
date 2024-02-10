@@ -1057,6 +1057,8 @@ __global__ void allreduce7(int* buff, int* scratch, void* resultBuff, int rank, 
   uint32_t* src = (uint32_t*)((char*)buff + rank * nelemsPerRank * sizeof(int));
   uint32_t* dst = (uint32_t*)((char*)resultBuff + rank * nelemsPerRank * sizeof(int));
 
+  //printf("Here\n");
+  //if (buff==scratch) {
   // step 1: write to scratch buffer
   constSmOutOfPlaceChans[peerIdx].putPackets2(scratchOffset, srcOffset, nelemsPerRank * sizeof(int), tid, blockDim.x * nBlocksPerPeer, flag);
   // step 2: get data from scratch buffer, reduce data and write result to remote scratch buffer
@@ -1080,13 +1082,14 @@ __global__ void allreduce7(int* buff, int* scratch, void* resultBuff, int rank, 
     }
   }
   // step 3: get data result from scratch buffer
-  mscclpp::LLPacket2* dstPkt = (mscclpp::LLPacket2*)((char*)scratch + scratchResultOffset);
+  /*mscclpp::LLPacket2* dstPkt = (mscclpp::LLPacket2*)((char*)scratch + scratchResultOffset);
   const int dstOffset = remoteRank * nPktsPerRank;
   uint32_t* result = (uint32_t*)((char*)resultBuff + remoteRank * nelemsPerRank * sizeof(int));
   for (int idx = threadIdx.x + localBlockIdx * blockDim.x; idx < nPktsPerRank; idx += blockDim.x * nBlocksPerPeer) {
     uint32_t data = dstPkt[idx + dstOffset].read(flag);
     result[idx] = data;
-  }
+  }*/
+  //}
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     globalFlag += 1;
   }
@@ -1305,11 +1308,14 @@ void AllReduceTestEngine::setupConnections() {
     return std::transform(in.begin(), in.end(), out.begin(),
                           [](const mscclpp::SmChannel& smChannel) { return mscclpp::deviceHandle(smChannel); });
   };
+  printf("In setup connections\n");
   if (isUsePacket()) {
     std::vector<DeviceHandle<mscclpp::SimpleProxyChannel>> proxyChannels;
 
     const size_t nPacket = (args_.maxBytes + sizeof(uint64_t) - 1) / sizeof(uint64_t);
     if (args_.kernelNum == 6 || args_.kernelNum == 7) {
+  	printf("In setup connections kernel 7\n");
+
       const size_t scratchPacketBuffBytes = nPacket * 2 * 2 * sizeof(mscclpp::LLPacket);
       setupMeshConnections(smOutOfPlaceChannels_, inputBuff_.get(), args_.maxBytes, scratchPacketBuff_.get(),
                            scratchPacketBuffBytes);

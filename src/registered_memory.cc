@@ -35,6 +35,7 @@ RegisteredMemory::Impl::Impl(void* data, size_t size, TransportFlags transports,
     this->transportInfos.push_back(transportInfo);
   }
   if ((transports & AllIBTransports).any()) {
+	  printf("In IB regmr\n");
     auto addIb = [&](Transport ibTransport) {
       TransportInfo transportInfo;
       transportInfo.transport = ibTransport;

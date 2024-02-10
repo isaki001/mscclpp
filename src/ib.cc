@@ -3,7 +3,7 @@
 
 #include "ib.hpp"
 
-#include <infiniband/verbs.h>
+//#include <infiniband/verbs.h>
 #include <malloc.h>
 #include <unistd.h>
 
@@ -58,18 +58,18 @@ IbMr::~IbMr() { /*ibv_dereg_mr(this->mr);*/ }
 
 IbMrInfo IbMr::getInfo() const {
   IbMrInfo info;
-  info.addr = reinterpret_cast<uint64_t>(this->buff);
-  info.rkey = this->mr->rkey;
+  /*info.addr = reinterpret_cast<uint64_t>(this->buff);
+  info.rkey = this->mr->rkey;*/
   return info;
 }
 
 const void* IbMr::getBuff() const { return this->buff; }
 
-uint32_t IbMr::getLkey() const { return this->mr->lkey; }
+uint32_t IbMr::getLkey() const { //return this->mr->lkey; 
+				 return 1000; }
 
-IbQp::IbQp(ibv_context* ctx, ibv_pd* pd, int port, int maxCqSize, int maxCqPollNum, int maxSendWr, int maxRecvWr,
-           int maxWrPerSend)
-    : numSignaledPostedItems(0), numSignaledStagedItems(0), maxCqPollNum(maxCqPollNum), maxWrPerSend(maxWrPerSend) {
+IbQp::IbQp(int port, int maxCqSize, int maxCqPollNum, int maxSendWr, int maxRecvWr,int maxWrPerSend) {
+    //: numSignaledPostedItems(0), numSignaledStagedItems(0), maxCqPollNum(maxCqPollNum), maxWrPerSend(maxWrPerSend) {
   /*this->cq = ibv_create_cq(ctx, maxCqSize, nullptr, nullptr, 0);
   if (this->cq == nullptr) {
     std::stringstream err;
@@ -291,7 +291,7 @@ int IbQp::pollCq() {
 
 IbQpInfo& IbQp::getInfo() { return this->info; }
 
-const ibv_wc* IbQp::getWc(int idx) const { return &this->wcs[idx]; }
+//const ibv_wc* IbQp::getWc(int idx) const { return NULL /*&this->wcs[idx]; }
 
 int IbQp::getNumCqItems() const { return this->numSignaledPostedItems; }
 
@@ -371,7 +371,7 @@ IbQp* IbCtx::createQp(int maxCqSize, int maxCqPollNum, int maxSendWr, int maxRec
   } else if (!this->isPortUsable(port)) {
     throw mscclpp::Error("invalid IB port: " + std::to_string(port), ErrorCode::InternalError);
   }*/
-  qps.emplace_back(new IbQp(this->ctx, this->pd, port, maxCqSize, maxCqPollNum, maxSendWr, maxRecvWr, maxWrPerSend));
+  //qps.emplace_back(new IbQp(this->ctx, this->pd, port, maxCqSize, maxCqPollNum, maxSendWr, maxRecvWr, maxWrPerSend));
   return qps.back().get();
 }
 

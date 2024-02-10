@@ -8,7 +8,7 @@
 
 #include "debug.h"
 #include "endpoint.hpp"
-#include "infiniband/verbs.h"
+//#include "infiniband/verbs.h"
 #include "npkit/npkit.h"
 #include "registered_memory.hpp"
 
@@ -98,6 +98,8 @@ IBConnection::IBConnection(Endpoint localEndpoint, Endpoint remoteEndpoint, Cont
     : transport_(localEndpoint.transport()),
       remoteTransport_(remoteEndpoint.transport()),
       dummyAtomicSource_(std::make_unique<uint64_t>(0)) {
+
+	      printf("In IBConnection\n");
   qp = getImpl(localEndpoint)->ibQp_;
   qp->rtr(getImpl(remoteEndpoint)->ibQpInfo_);
   qp->rts();
@@ -171,10 +173,10 @@ void IBConnection::flush(int64_t timeoutUsec) {
       }
     }
     for (int i = 0; i < wcNum; ++i) {
-      const ibv_wc* wc = qp->getWc(i);
+      /*const ibv_wc* wc = qp->getWc(i);
       if (wc->status != IBV_WC_SUCCESS) {
         throw mscclpp::IbError("a work item failed: status " + std::to_string(wc->status), wc->status);
-      }
+      }*/
     }
   }
   INFO(MSCCLPP_NET, "IBConnection flushing connection");

@@ -71,16 +71,19 @@ class IbQp {
   int pollCq();
 
   IbQpInfo& getInfo();
-  const ibv_wc* getWc(int idx) const;
+  //const ibv_wc* getWc(int idx) const;
   int getNumCqItems() const;
 
  private:
   struct WrInfo {
-    ibv_send_wr* wr;
-    ibv_sge* sge;
+    /*ibv_send_wr* wr;
+    ibv_sge* sge;*/
+	  int sge;
   };
 
-  IbQp(ibv_context* ctx, ibv_pd* pd, int port, int maxCqSize, int maxCqPollNum, int maxSendWr, int maxRecvWr,
+  //IbQp(ibv_context* ctx, ibv_pd* pd, int port, int maxCqSize, int maxCqPollNum, int maxSendWr, int maxRecvWr,
+       //int maxWrPerSend);
+  IbQp(int port, int maxCqSize, int maxCqPollNum, int maxSendWr, int maxRecvWr,
        int maxWrPerSend);
   WrInfo getNewWrInfo();
 
@@ -88,15 +91,15 @@ class IbQp {
 
   ibv_qp* qp;
   ibv_cq* cq;
-  std::unique_ptr<ibv_wc[]> wcs;
+  /*std::unique_ptr<ibv_wc[]> wcs;
   std::unique_ptr<ibv_send_wr[]> wrs;
-  std::unique_ptr<ibv_sge[]> sges;
+  std::unique_ptr<ibv_sge[]> sges;*/
   int wrn;
   int numSignaledPostedItems;
   int numSignaledStagedItems;
 
-  const int maxCqPollNum;
-  const int maxWrPerSend;
+  /*const int maxCqPollNum;
+  const int maxWrPerSend;*/
 
   friend class IbCtx;
 };
