@@ -7,6 +7,7 @@ set(MSCCLPP_PATCH "2")
 
 set(MSCCLPP_SOVERSION ${MSCCLPP_MAJOR})
 set(MSCCLPP_VERSION "${MSCCLPP_MAJOR}.${MSCCLPP_MINOR}.${MSCCLPP_PATCH}")
+Set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 cmake_minimum_required(VERSION 3.25)
 enable_language(CXX)
@@ -58,6 +59,8 @@ endif()
 # Declare project
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wall ")
+
 if(USE_CUDA)
     set(CMAKE_CUDA_STANDARD 17)
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -Wall,-Wextra")
@@ -82,7 +85,9 @@ if(USE_CUDA)
     set(GPU_INCLUDE_DIRS ${CUDAToolkit_INCLUDE_DIRS})
 else()
     set(CMAKE_HIP_STANDARD 17)
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wall -Wextra")
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wall -Wextra -mllvm --amdgpu-kernarg-preload-count=16")
+    #set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wall -Wextra")
+
     project(mscclpp LANGUAGES CXX HIP)
 
     set(CMAKE_HIP_ARCHITECTURES gfx90a gfx941 gfx942)
@@ -95,7 +100,7 @@ endif()
 include(${PROJECT_SOURCE_DIR}/cmake/AddFormatTargets.cmake)
 
 # Find ibverbs and libnuma
-find_package(IBVerbs REQUIRED)
+#find_package(IBVerbs REQUIRED)
 find_package(NUMA REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -103,9 +108,11 @@ add_library(mscclpp_obj OBJECT)
 target_include_directories(mscclpp_obj
     PRIVATE
     ${GPU_INCLUDE_DIRS}
-    ${IBVERBS_INCLUDE_DIRS}
+    #${IBVERBS_INCLUDE_DIRS}
     ${NUMA_INCLUDE_DIRS})
-target_link_libraries(mscclpp_obj PRIVATE ${GPU_LIBRARIES} ${NUMA_LIBRARIES} ${IBVERBS_LIBRARIES} Threads::Threads)
+#target_link_libraries(mscclpp_obj PRIVATE ${GPU_LIBRARIES} ${NUMA_LIBRARIES} ${IBVERBS_LIBRARIES} Threads::Threads)
+target_link_libraries(mscclpp_obj PRIVATE ${GPU_LIBRARIES} ${NUMA_LIBRARIES} Threads::Threads)
+
 set_target_properties(mscclpp_obj PROPERTIES LINKER_LANGUAGE CXX POSITION_INDEPENDENT_CODE 1 VERSION ${MSCCLPP_VERSION} SOVERSION ${MSCCLPP_SOVERSION})
 if(USE_CUDA)
     target_compile_definitions(mscclpp_obj PRIVATE USE_CUDA)

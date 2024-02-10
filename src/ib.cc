@@ -34,7 +34,7 @@ static bool checkNvPeerMemLoaded() {
 namespace mscclpp {
 
 IbMr::IbMr(ibv_pd* pd, void* buff, std::size_t size) : buff(buff) {
-  if (size == 0) {
+  /*if (size == 0) {
     throw std::invalid_argument("invalid size: " + std::to_string(size));
   }
   static __thread uintptr_t pageSize = 0;
@@ -51,10 +51,10 @@ IbMr::IbMr(ibv_pd* pd, void* buff, std::size_t size) : buff(buff) {
     err << "ibv_reg_mr failed (errno " << errno << ")";
     throw mscclpp::IbError(err.str(), errno);
   }
-  this->size = pages * pageSize;
+  this->size = pages * pageSize;*/
 }
 
-IbMr::~IbMr() { ibv_dereg_mr(this->mr); }
+IbMr::~IbMr() { /*ibv_dereg_mr(this->mr);*/ }
 
 IbMrInfo IbMr::getInfo() const {
   IbMrInfo info;
@@ -70,7 +70,7 @@ uint32_t IbMr::getLkey() const { return this->mr->lkey; }
 IbQp::IbQp(ibv_context* ctx, ibv_pd* pd, int port, int maxCqSize, int maxCqPollNum, int maxSendWr, int maxRecvWr,
            int maxWrPerSend)
     : numSignaledPostedItems(0), numSignaledStagedItems(0), maxCqPollNum(maxCqPollNum), maxWrPerSend(maxWrPerSend) {
-  this->cq = ibv_create_cq(ctx, maxCqSize, nullptr, nullptr, 0);
+  /*this->cq = ibv_create_cq(ctx, maxCqSize, nullptr, nullptr, 0);
   if (this->cq == nullptr) {
     std::stringstream err;
     err << "ibv_create_cq failed (errno " << errno << ")";
@@ -135,16 +135,16 @@ IbQp::IbQp(ibv_context* ctx, ibv_pd* pd, int port, int maxCqSize, int maxCqPollN
   this->wrn = 0;
   this->wrs = std::make_unique<ibv_send_wr[]>(maxWrPerSend);
   this->sges = std::make_unique<ibv_sge[]>(maxWrPerSend);
-  this->wcs = std::make_unique<ibv_wc[]>(maxCqPollNum);
+  this->wcs = std::make_unique<ibv_wc[]>(maxCqPollNum);*/
 }
 
 IbQp::~IbQp() {
-  ibv_destroy_qp(this->qp);
-  ibv_destroy_cq(this->cq);
+  /*ibv_destroy_qp(this->qp);
+  ibv_destroy_cq(this->cq);*/
 }
 
 void IbQp::rtr(const IbQpInfo& info) {
-  struct ibv_qp_attr qp_attr;
+  /*struct ibv_qp_attr qp_attr;
   std::memset(&qp_attr, 0, sizeof(struct ibv_qp_attr));
   qp_attr.qp_state = IBV_QPS_RTR;
   qp_attr.path_mtu = static_cast<ibv_mtu>(info.mtu);
@@ -174,11 +174,11 @@ void IbQp::rtr(const IbQpInfo& info) {
     std::stringstream err;
     err << "ibv_modify_qp failed (errno " << errno << ")";
     throw mscclpp::IbError(err.str(), errno);
-  }
+  }*/
 }
 
 void IbQp::rts() {
-  struct ibv_qp_attr qp_attr;
+  /*struct ibv_qp_attr qp_attr;
   std::memset(&qp_attr, 0, sizeof(struct ibv_qp_attr));
   qp_attr.qp_state = IBV_QPS_RTS;
   qp_attr.timeout = 18;
@@ -193,10 +193,10 @@ void IbQp::rts() {
     std::stringstream err;
     err << "ibv_modify_qp failed (errno " << errno << ")";
     throw mscclpp::IbError(err.str(), errno);
-  }
+  }*/
 }
 
-IbQp::WrInfo IbQp::getNewWrInfo() {
+/*IbQp::WrInfo IbQp::getNewWrInfo() {
   if (this->wrn >= this->maxWrPerSend) {
     std::stringstream err;
     err << "too many outstanding work requests. limit is " << this->maxWrPerSend;
@@ -214,11 +214,11 @@ IbQp::WrInfo IbQp::getNewWrInfo() {
   }
   this->wrn++;
   return IbQp::WrInfo{wr_, sge_};
-}
+}*/
 
 void IbQp::stageSend(const IbMr* mr, const IbMrInfo& info, uint32_t size, uint64_t wrId, uint64_t srcOffset,
                      uint64_t dstOffset, bool signaled) {
-  auto wrInfo = this->getNewWrInfo();
+  /*auto wrInfo = this->getNewWrInfo();
   wrInfo.wr->wr_id = wrId;
   wrInfo.wr->opcode = IBV_WR_RDMA_WRITE;
   wrInfo.wr->send_flags = signaled ? IBV_SEND_SIGNALED : 0;
@@ -227,12 +227,12 @@ void IbQp::stageSend(const IbMr* mr, const IbMrInfo& info, uint32_t size, uint64
   wrInfo.sge->addr = (uint64_t)(mr->getBuff()) + srcOffset;
   wrInfo.sge->length = size;
   wrInfo.sge->lkey = mr->getLkey();
-  if (signaled) (this->numSignaledStagedItems)++;
+  if (signaled) (this->numSignaledStagedItems)++;*/
 }
 
 void IbQp::stageAtomicAdd(const IbMr* mr, const IbMrInfo& info, uint64_t wrId, uint64_t dstOffset, uint64_t addVal,
                           bool signaled) {
-  auto wrInfo = this->getNewWrInfo();
+  /*auto wrInfo = this->getNewWrInfo();
   wrInfo.wr->wr_id = wrId;
   wrInfo.wr->opcode = IBV_WR_ATOMIC_FETCH_AND_ADD;
   wrInfo.wr->send_flags = signaled ? IBV_SEND_SIGNALED : 0;
@@ -240,14 +240,14 @@ void IbQp::stageAtomicAdd(const IbMr* mr, const IbMrInfo& info, uint64_t wrId, u
   wrInfo.wr->wr.atomic.rkey = info.rkey;
   wrInfo.wr->wr.atomic.compare_add = addVal;
   wrInfo.sge->addr = (uint64_t)(mr->getBuff());
-  wrInfo.sge->length = sizeof(uint64_t);  // atomic op is always on uint64_t
+  wrInfo.sge->length = sizeof(uint64_t);
   wrInfo.sge->lkey = mr->getLkey();
-  if (signaled) (this->numSignaledStagedItems)++;
+  if (signaled) (this->numSignaledStagedItems)++;*/
 }
 
 void IbQp::stageSendWithImm(const IbMr* mr, const IbMrInfo& info, uint32_t size, uint64_t wrId, uint64_t srcOffset,
                             uint64_t dstOffset, bool signaled, unsigned int immData) {
-  auto wrInfo = this->getNewWrInfo();
+  /*auto wrInfo = this->getNewWrInfo();
   wrInfo.wr->wr_id = wrId;
   wrInfo.wr->opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
   wrInfo.wr->send_flags = signaled ? IBV_SEND_SIGNALED : 0;
@@ -257,14 +257,14 @@ void IbQp::stageSendWithImm(const IbMr* mr, const IbMrInfo& info, uint32_t size,
   wrInfo.sge->addr = (uint64_t)(mr->getBuff()) + srcOffset;
   wrInfo.sge->length = size;
   wrInfo.sge->lkey = mr->getLkey();
-  if (signaled) (this->numSignaledStagedItems)++;
+  if (signaled) (this->numSignaledStagedItems)++;*/
 }
 
 void IbQp::postSend() {
   if (this->wrn == 0) {
     return;
   }
-  struct ibv_send_wr* bad_wr;
+  /*struct ibv_send_wr* bad_wr;
   int ret = ibv_post_send(this->qp, this->wrs.get(), &bad_wr);
   if (ret != 0) {
     std::stringstream err;
@@ -277,15 +277,16 @@ void IbQp::postSend() {
   if (this->numSignaledPostedItems + 4 > this->cq->cqe) {
     WARN("IB: CQ is almost full ( %d / %d ). The connection needs to be flushed to prevent timeout errors.",
          this->numSignaledPostedItems, this->cq->cqe);
-  }
+  }*/
 }
 
 int IbQp::pollCq() {
-  int wcNum = ibv_poll_cq(this->cq, this->maxCqPollNum, this->wcs.get());
+  /*int wcNum = ibv_poll_cq(this->cq, this->maxCqPollNum, this->wcs.get());
   if (wcNum > 0) {
     this->numSignaledPostedItems -= wcNum;
   }
-  return wcNum;
+  return wcNum;*/
+	return -1;
 }
 
 IbQpInfo& IbQp::getInfo() { return this->info; }
@@ -301,20 +302,20 @@ IbCtx::IbCtx(const std::string& devName) : devName(devName) {
   }
 #endif  // !defined(__HIP_PLATFORM_AMD__)
   int num;
-  struct ibv_device** devices = ibv_get_device_list(&num);
+  /*struct ibv_device** devices = ibv_get_device_list(&num);
   for (int i = 0; i < num; ++i) {
     if (std::string(devices[i]->name) == devName) {
       this->ctx = ibv_open_device(devices[i]);
       break;
     }
-  }
-  ibv_free_device_list(devices);
+  }*/
+  //ibv_free_device_list(devices);
   if (this->ctx == nullptr) {
     std::stringstream err;
     err << "ibv_open_device failed (errno " << errno << ", device name << " << devName << ")";
     throw mscclpp::IbError(err.str(), errno);
   }
-  this->pd = ibv_alloc_pd(this->ctx);
+  //this->pd = ibv_alloc_pd(this->ctx);
   if (this->pd == nullptr) {
     std::stringstream err;
     err << "ibv_alloc_pd failed (errno " << errno << ")";
@@ -326,26 +327,27 @@ IbCtx::~IbCtx() {
   this->mrs.clear();
   this->qps.clear();
   if (this->pd != nullptr) {
-    ibv_dealloc_pd(this->pd);
+    //ibv_dealloc_pd(this->pd);
   }
   if (this->ctx != nullptr) {
-    ibv_close_device(this->ctx);
+    //ibv_close_device(this->ctx);
   }
 }
 
 bool IbCtx::isPortUsable(int port) const {
-  struct ibv_port_attr portAttr;
+  /*struct ibv_port_attr portAttr;
   if (ibv_query_port(this->ctx, port, &portAttr) != 0) {
     std::stringstream err;
     err << "ibv_query_port failed (errno " << errno << ", port << " << port << ")";
     throw mscclpp::IbError(err.str(), errno);
   }
   return portAttr.state == IBV_PORT_ACTIVE &&
-         (portAttr.link_layer == IBV_LINK_LAYER_ETHERNET || portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND);
+         (portAttr.link_layer == IBV_LINK_LAYER_ETHERNET || portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND);*/
+	return false;
 }
 
 int IbCtx::getAnyActivePort() const {
-  struct ibv_device_attr devAttr;
+  /*struct ibv_device_attr devAttr;
   if (ibv_query_device(this->ctx, &devAttr) != 0) {
     std::stringstream err;
     err << "ibv_query_device failed (errno " << errno << ")";
@@ -355,20 +357,20 @@ int IbCtx::getAnyActivePort() const {
     if (this->isPortUsable(port)) {
       return port;
     }
-  }
+  }*/
   return -1;
 }
 
 IbQp* IbCtx::createQp(int maxCqSize, int maxCqPollNum, int maxSendWr, int maxRecvWr, int maxWrPerSend,
                       int port /*=-1*/) {
-  if (port == -1) {
+  /*if (port == -1) {
     port = this->getAnyActivePort();
     if (port == -1) {
       throw mscclpp::Error("No active port found", ErrorCode::InternalError);
     }
   } else if (!this->isPortUsable(port)) {
     throw mscclpp::Error("invalid IB port: " + std::to_string(port), ErrorCode::InternalError);
-  }
+  }*/
   qps.emplace_back(new IbQp(this->ctx, this->pd, port, maxCqSize, maxCqPollNum, maxSendWr, maxRecvWr, maxWrPerSend));
   return qps.back().get();
 }
@@ -382,7 +384,7 @@ const std::string& IbCtx::getDevName() const { return this->devName; }
 
 MSCCLPP_API_CPP int getIBDeviceCount() {
   int num;
-  ibv_get_device_list(&num);
+  //ibv_get_device_list(&num);
   return num;
 }
 
@@ -407,7 +409,7 @@ std::string getHcaDevices(int deviceIndex) {
 
 MSCCLPP_API_CPP std::string getIBDeviceName(Transport ibTransport) {
   int ibTransportIndex;
-  switch (ibTransport) {  // TODO: get rid of this ugly switch
+  /*switch (ibTransport) { 
     case Transport::IB0:
       ibTransportIndex = 0;
       break;
@@ -447,15 +449,16 @@ MSCCLPP_API_CPP std::string getIBDeviceName(Transport ibTransport) {
     ss << "IB transport out of range: " << ibTransportIndex << " >= " << num;
     throw std::out_of_range(ss.str());
   }
-  return devices[ibTransportIndex]->name;
+  return devices[ibTransportIndex]->name;*/
+  return "";
 }
 
 MSCCLPP_API_CPP Transport getIBTransportByDeviceName(const std::string& ibDeviceName) {
   int num;
-  struct ibv_device** devices = ibv_get_device_list(&num);
+  /*struct ibv_device** devices = ibv_get_device_list(&num);
   for (int i = 0; i < num; ++i) {
     if (ibDeviceName == devices[i]->name) {
-      switch (i) {  // TODO: get rid of this ugly switch
+      switch (i) {  
         case 0:
           return Transport::IB0;
         case 1:
@@ -476,7 +479,7 @@ MSCCLPP_API_CPP Transport getIBTransportByDeviceName(const std::string& ibDevice
           throw std::out_of_range("IB device index out of range");
       }
     }
-  }
+  }*/
   throw std::invalid_argument("IB device not found");
 }
 
