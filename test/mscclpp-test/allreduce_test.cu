@@ -1148,7 +1148,8 @@ void AllReduceTestColl::runColl(const TestArgs& args, cudaStream_t stream) {
        nThreadsPerBlock = 1024;
     } else {
        nBlocks = 56;
-       nThreadsPerBlock = 512;
+       //nThreadsPerBlock = 512;
+       nThreadsPerBlock = (paramCount_ <= 76800) ? 512: 1024;
     }
 
   }else {
