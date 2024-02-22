@@ -7,6 +7,7 @@ set(MSCCLPP_PATCH "2")
 
 set(MSCCLPP_SOVERSION ${MSCCLPP_MAJOR})
 set(MSCCLPP_VERSION "${MSCCLPP_MAJOR}.${MSCCLPP_MINOR}.${MSCCLPP_PATCH}")
+Set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 cmake_minimum_required(VERSION 3.25)
 enable_language(CXX)
@@ -83,11 +84,14 @@ if(USE_CUDA)
 else()
     set(CMAKE_HIP_STANDARD 17)
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wall -Wextra")
-    project(mscclpp LANGUAGES CXX HIP)
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -Wall -Wextra -mllvm --amdgpu-kernarg-preload-count=16")
+    project(mscclpp LANGUAGES CXX)
+    #project(mscclpp LANGUAGES CXX HIP)
 
     set(CMAKE_HIP_ARCHITECTURES gfx90a gfx941 gfx942)
 
-    set(GPU_LIBRARIES hip::host)
+    #set(GPU_LIBRARIES hip::host)
+    set(GPU_LIBRARIES hip::device)
     set(GPU_INCLUDE_DIRS ${hip_INCLUDE_DIRS})
 endif()
 

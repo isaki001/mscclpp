@@ -8,6 +8,7 @@
 #include <mpi.h>
 #include <numa.h>
 #include <unistd.h>
+#include <string.h>
 
 #include <chrono>
 #include <cstdint>
@@ -20,6 +21,8 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <hip/hip_fp16.h>
+
 
 int isMainProc = 0;
 
@@ -49,6 +52,7 @@ int average = 1;
 int kernel_num = 0;
 int cudaGraphLaunches = 15;
 std::string output_file;
+std::string type_name = "half";
 
 double parseSize(const char* value) {
   std::string valueStr(value);
@@ -124,7 +128,7 @@ const std::string getBusId(int cudaDev) {
 }
 
 void validateArgsForDeviceKernel(const std::vector<KernelRestriction>& restrictions, int kernelNum, size_t paramCount,
-                                 int worldSize, int nRanksPerNode, int typeSize = 4) {
+                                 int worldSize, int nRanksPerNode, int typeSize = 2) {
   auto iter = std::find_if(restrictions.begin(), restrictions.end(), [kernelNum](const KernelRestriction& restriction) {
     return restriction.kernelNum == kernelNum;
   });
@@ -189,9 +193,22 @@ BaseTestEngine::BaseTestEngine(const TestArgs& args, const std::string& name)
 
 BaseTestEngine::~BaseTestEngine() { (void)cudaStreamDestroy(stream_); }
 
+int getTypeSize(std::string type_name) {
+
+	if (!type_name.compare("half")) {
+		return 2;
+	} else {
+		return 4;	
+	}	
+}
+
 void BaseTestColl::setupCollTest(const TestArgs& args, size_t size) {
   this->worldSize_ = args.totalRanks;
-  this->typeSize_ = sizeof(int);
+  //this->typeSize_ = sizeof(int);
+  //this->typeSize_ = sizeof(half);
+  this->typeSize_ = getTypeSize(type_name);
+
+  //(args.type).assign(type_name);
   this->kernelNum_ = args.kernelNum;
   this->setupCollTest(size);
 }
@@ -229,22 +246,25 @@ void BaseTestEngine::runTest() {
   // warm-up for large size
   this->coll_->setupCollTest(args_, args_.maxBytes);
   this->barrier();
-  validateArgsForDeviceKernel(coll_->getKernelRestrictions(), args_.kernelNum, coll_->getParamBytes() / sizeof(int),
+  validateArgsForDeviceKernel(coll_->getKernelRestrictions(), args_.kernelNum, coll_->getParamBytes() / sizeof(half),
                               args_.totalRanks, args_.nRanksPerNode);
-  for (int iter = 0; iter < warmup_iters; iter++) {
+  //printf("Validate test done\n");
+
+  /*for (int iter = 0; iter < warmup_iters; iter++) {
     this->coll_->runColl(args_, stream_);
   }
-  CUDATHROW(cudaDeviceSynchronize());
+  CUDATHROW(cudaDeviceSynchronize());*/
+  //printf("Back from runColl\n");
 
   // warm-up for small size
   this->coll_->setupCollTest(args_, args_.minBytes);
   this->barrier();
-  validateArgsForDeviceKernel(coll_->getKernelRestrictions(), args_.kernelNum, coll_->getParamBytes() / sizeof(int),
+  validateArgsForDeviceKernel(coll_->getKernelRestrictions(), args_.kernelNum, coll_->getParamBytes() / sizeof(half),
                               args_.totalRanks, args_.nRanksPerNode);
-  for (int iter = 0; iter < warmup_iters; iter++) {
+  /*for (int iter = 0; iter < warmup_iters; iter++) {
     this->coll_->runColl(args_, stream_);
   }
-  CUDATHROW(cudaDeviceSynchronize());
+  CUDATHROW(cudaDeviceSynchronize());*/
 
   std::stringstream ss;
   ss << "#\n";
@@ -262,9 +282,9 @@ void BaseTestEngine::runTest() {
     this->coll_->initData(this->args_, this->getSendBuff(), this->getExpectedBuff());
 
     ss << std::setw(12) << std::max(coll_->getSendBytes(), coll_->getExpectedBytes()) << "  " << std::setw(12)
-       << coll_->getParamBytes() / sizeof(int);
+       << coll_->getParamBytes() / sizeof(half);
 
-    validateArgsForDeviceKernel(coll_->getKernelRestrictions(), args_.kernelNum, coll_->getParamBytes() / sizeof(int),
+    validateArgsForDeviceKernel(coll_->getKernelRestrictions(), args_.kernelNum, coll_->getParamBytes() / sizeof(half),
                                 args_.totalRanks, args_.nRanksPerNode);
     double deltaSec = benchTime();
 
@@ -345,10 +365,16 @@ size_t BaseTestEngine::checkData() {
   void* expectedBuff = this->getExpectedBuff();
 
   size_t recvBytes = this->coll_->getRecvBytes();
-  std::vector<int> recvData(recvBytes / sizeof(int), 0);
+
+  //std::vector<int> recvData(recvBytes / sizeof(int), 0);
+  std::vector<half> recvData(recvBytes / sizeof(half), 0);
+  //printf("In check data %ld\n", recvBytes);
+
   CUDATHROW(cudaMemcpy(recvData.data(), recvBuff, recvBytes, cudaMemcpyDeviceToHost));
   for (size_t i = 0; i < recvData.size(); i++) {
-    if (recvData[i] != ((int*)expectedBuff)[i]) {
+	  float c= (float)recvData[i];
+	  //printf("C = %f, expected = %f\n", c, (float)(((half*)expectedBuff)[i]));
+    if (c != (float)(((half*)expectedBuff)[i])) {
       nErrors++;
     }
   }
@@ -544,12 +570,13 @@ int main(int argc, char* argv[]) {
                               {"average", required_argument, 0, 'a'},
                               {"kernel_num", required_argument, 0, 'k'},
                               {"output_file", required_argument, 0, 'o'},
+                              {"datatype", required_argument, 0, 'd'},
                               {"help", no_argument, 0, 'h'},
                               {}};
 
   while (1) {
     int c;
-    c = getopt_long(argc, argv, "b:e:i:f:n:w:c:G:a:k:o:h:", longopts, &longindex);
+    c = getopt_long(argc, argv, "b:e:i:f:n:w:c:G:a:k:o:d:h:", longopts, &longindex);
 
     if (c == -1) break;
 
@@ -601,6 +628,9 @@ int main(int argc, char* argv[]) {
       case 'o':
         output_file = optarg;
         break;
+      case 'd':
+        type_name = optarg;
+        break;
       case 'h':
       default:
         if (c != 'h') printf("invalid option '%c'\n", c);
@@ -618,6 +648,7 @@ int main(int argc, char* argv[]) {
             "[-a,--average <0/1/2/3> report average iteration time <0=RANK0/1=AVG/2=MIN/3=MAX>] \n\t"
             "[-k,--kernel_num <kernel number of commnication primitive>] \n\t"
             "[-o, --output_file <output file name>] \n\t"
+            "[-d, --datatype <type name>] \n\t"
             "[-h,--help]\n",
             basename(argv[0]));
         return 0;
@@ -702,6 +733,7 @@ void run(int argc, char* argv[]) {
   PRINT("# Setting up the connection in MSCCL++\n");
   testEngine->setupTest();
   testEngine->barrier();
+
   testEngine->runTest();
 
   fflush(stdout);

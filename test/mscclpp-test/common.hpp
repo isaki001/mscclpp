@@ -36,7 +36,9 @@ struct TestArgs {
   int localRank;
   int nRanksPerNode;
   int kernelNum;
+  //std::string type;
   int reportErrors;
+
 };
 
 struct KernelRestriction {

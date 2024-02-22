@@ -11,6 +11,7 @@
 #if defined(MSCCLPP_DEVICE_COMPILE)
 #include "atomic_device.hpp"
 #include "poll_device.hpp"
+#include <hip/hip_fp16.h>
 #endif  // defined(MSCCLPP_DEVICE_COMPILE)
 
 namespace mscclpp {
@@ -191,9 +192,13 @@ MSCCLPP_DEVICE_INLINE void putPackets2(void* targetPtr, uint64_t targetOffset, c
                                       uint64_t originOffset, uint64_t originBytes, uint32_t threadId,
                                       uint32_t numThreads, uint32_t flag) {
   // Offsets should be aligned to 8 bytes & size should be a multiple of 8 bytes
-  const uint32_t* originBase = (const uint32_t*)((const char*)originPtr + originOffset);
+  //const uint32_t* originBase = (const uint32_t*)((const char*)originPtr + originOffset);
+  const half* originBase = (const half*)((const char*)originPtr + originOffset);
+
   LLPacket2* targetBase = (LLPacket2*)((char*)targetPtr + targetOffset);
-  size_t nElem = originBytes / sizeof(uint32_t);
+  //size_t nElem = originBytes / sizeof(uint32_t);
+  size_t nElem = originBytes / sizeof(half);
+
   for (size_t i = threadId; i < nElem; i += numThreads) {
     LLPacket2* pkt = &targetBase[i];
     pkt->write(originBase[i], flag);
