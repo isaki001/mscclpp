@@ -6,6 +6,7 @@
 #include <mscclpp/core.hpp>
 #include <mscclpp/sm_channel.hpp>
 #include <mscclpp/sm_channel_device.hpp>
+#include <unordered_map>
 #include <vector>
 
 #include "nccl.h"
@@ -176,8 +177,10 @@ struct hash<channelKey> {
 struct ChannelInfo {
   std::vector<mscclpp::SmChannel> smChannels;
   std::vector<mscclpp::SmChannel> smOutChannels;
-  std::vector<mscclpp::DeviceHandle<mscclpp::SmChannel>> smChannelDeviceHandles;
-  std::vector<mscclpp::DeviceHandle<mscclpp::SmChannel>> smOutChannelDeviceHandles;
+  /*std::vector<mscclpp::DeviceHandle<mscclpp::SmChannel>> smChannelDeviceHandles;
+  std::vector<mscclpp::DeviceHandle<mscclpp::SmChannel>> smOutChannelDeviceHandles;*/
+  void* smChannelDeviceHandles;
+  void* smOutChannelDeviceHandles;  
 };
 
 struct ncclComm {
@@ -216,46 +219,6 @@ __global__ void allreduce6(T* buff, T* scratch, T* resultBuff, int rank, int nRa
   const int localBlockIdx = blockIdx.x % nBlocksPerPeer;
   const int peerIdx = blockIdx.x / nBlocksPerPeer;
   const int remoteRank = peerIdx < rank ? peerIdx : peerIdx + 1;
-  mscclpp::SmChannelDeviceHandle smChan = constSmChannels[peerIdx];
-  const int tid = threadIdx.x + localBlockIdx * blockDim.x;
-  // double buffering
-  size_t scratchBaseOffset = (flag & 1) ? 0 : nPkts * sizeof(mscclpp::LLPacket);
-  void* scratchBuff = (void*)((char*)scratch + scratchBaseOffset);
-  size_t scratchOffset = scratchBaseOffset + rank * nPktsPerRank * sizeof(mscclpp::LLPacket);
-  size_t scratchResultOffset =
-      (flag & 1) ? 2 * nPkts * sizeof(mscclpp::LLPacket) : 3 * nPkts * sizeof(mscclpp::LLPacket);
-  size_t srcOffset = remoteRank * nelemsPerRank * sizeof(int);
-  uint2* src = (uint2*)((char*)buff + rank * nelemsPerRank * sizeof(int));
-  uint2* dst = (uint2*)((char*)resultBuff + rank * nelemsPerRank * sizeof(int));
-
-  // step 1: write to scratch buffer
-  smChan.putPackets(scratchOffset, srcOffset, nelemsPerRank * sizeof(int), tid, blockDim.x * nBlocksPerPeer, flag);
-  // step 2: get data from scratch buffer, reduce data and write result to remote scratch buffer
-  for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < nPktsPerRank; idx += blockDim.x * gridDim.x) {
-    uint2 data = make_uint2(0, 0);
-    for (int index = 0; index < nPeers; index++) {
-      const int remoteRank = index < rank ? index : index + 1;
-      mscclpp::LLPacket* dstPkt = (mscclpp::LLPacket*)scratchBuff + remoteRank * nPktsPerRank;
-      uint2 val = dstPkt[idx].read(flag);
-      data = add_vectors<T>(val, data);
-    }
-    data = add_vectors<T>(data, src[idx]);
-    dst[idx].x = data.x;
-    dst[idx].y = data.y;
-    for (int index = 0; index < nPeers; index++) {
-      mscclpp::LLPacket* dstPkt = (mscclpp::LLPacket*)((char*)constSmChannels[index].dst_ + scratchResultOffset);
-      dstPkt[idx + rank * nPktsPerRank].write(data.x, data.y, flag);
-    }
-  }
-  // step 3: get data result from scratch buffer
-  mscclpp::LLPacket* dstPkt = (mscclpp::LLPacket*)((char*)scratch + scratchResultOffset);
-  const int dstOffset = remoteRank * nPktsPerRank;
-  uint2* result = (uint2*)((char*)resultBuff + remoteRank * nelemsPerRank * sizeof(int));
-  for (int idx = threadIdx.x + localBlockIdx * blockDim.x; idx < nPktsPerRank; idx += blockDim.x * nBlocksPerPeer) {
-    uint2 data = dstPkt[idx + dstOffset].read(flag);
-    result[idx].x = data.x;
-    result[idx].y = data.y;
-  }
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     globalFlag += 1;
   }
@@ -273,70 +236,6 @@ __global__ void allreduce1(T* src, T* dst, int rank, int nranks, size_t nelems) 
   int4* dst4 = (int4*)dst;
   const int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
-  // synchronize everyone
-  if (tid == 0) {
-    __threadfence_system();
-  }
-  __syncthreads();
-  if (tid < nPeer) {
-    constSmChannels[tid].relaxedSignal();
-  }
-  if (tid >= nPeer && tid < nPeer * 2) {
-    constSmChannels[tid - nPeer].wait();
-  }
-  deviceSyncer.sync(gridDim.x);
-
-  // use int4 as much as possible
-  const size_t nInt4 = chunkSize / vectorSize;
-  for (size_t idx = threadIdx.x + blockIdx.x * blockDim.x; idx < nInt4; idx += blockDim.x * gridDim.x) {
-    int4 tmp = src4[indexOffset4 + idx];
-    for (int index = 0; index < nPeer; ++index) {
-      int4 val;
-      int peerIdx = (index + rank);
-      if (peerIdx >= nPeer) peerIdx -= nPeer;
-      val = constSmChannels[peerIdx].read<int4>(indexOffset4 + idx);
-      tmp = add_vectors<T>(tmp, val);
-    }
-    dst4[indexOffset4 + idx] = tmp;
-  }
-
-  // use the given TYPE for the rest
-  size_t processed = nInt4 * vectorSize * nranks;
-  const size_t nRemElems = nelems - processed;
-  const size_t startIdx = processed + (nRemElems * rank) / nranks;
-  const size_t endIdx = processed + (nRemElems * (rank + 1)) / nranks;
-  for (size_t idx = threadIdx.x + blockIdx.x * blockDim.x + startIdx; idx < endIdx; idx += blockDim.x * gridDim.x) {
-    T tmp = src[idx];
-    for (int index = 0; index < nPeer; ++index) {
-      int peerIdx = (index + rank);
-      if (peerIdx >= nPeer) peerIdx -= nPeer;
-      T val = constSmChannels[peerIdx].read<T>(idx);
-      tmp += val;
-    }
-    dst[idx] = tmp;
-  }
-
-  // synchronize everyone again
-  deviceSyncer.sync(gridDim.x);
-  if (tid == 0) {
-    __threadfence_system();
-  }
-  __syncthreads();
-  if (tid < nPeer) {
-    constSmChannels[tid].relaxedSignal();
-  }
-  if (tid >= nPeer && tid < nPeer * 2) {
-    constSmChannels[tid - nPeer].wait();
-  }
-
-  deviceSyncer.sync(gridDim.x);
-  for (int i = 0; i < nPeer; ++i) {
-    int peerIdx = (i + rank);
-    if (peerIdx >= nPeer) peerIdx -= nPeer;
-    const int remoteRank = (peerIdx < rank ? peerIdx : peerIdx + 1);
-    size_t offset = chunkSize * remoteRank * sizeof(T);
-    constSmOutChannels[peerIdx].get(offset, chunkSize * sizeof(T), tid, blockDim.x * gridDim.x);
-  }
 }
 
 template <typename T>
@@ -345,59 +244,6 @@ __global__ void allreduce7(T* buff, T* scratch, T* resultBuff, int rank, int nRa
   // This version of allreduce only works for single nodes
   if (worldSize != nRanksPerNode) return;
   nelems = nelems / (sizeof(int) / sizeof(T));
-  const int nPeers = nRanksPerNode - 1;
-  const size_t nPkts = nelems;
-  const int nelemsPerRank = nelems / worldSize;
-  const int nPktsPerRank = nelemsPerRank;
-  // flag for packets. Initially 1
-  const uint32_t flag = (uint32_t)globalFlag;
-  // thread block & channel info
-  const int nBlocksPerPeer = gridDim.x / nPeers;
-  const int localBlockIdx = blockIdx.x % nBlocksPerPeer;
-  const int peerIdx = blockIdx.x / nBlocksPerPeer;
-  const int remoteRank = peerIdx < rank ? peerIdx : peerIdx + 1;
-  const int tid = threadIdx.x + localBlockIdx * blockDim.x;
-  // double buffering
-  size_t scratchBaseOffset = (flag & 1) ? 0 : nPkts * sizeof(mscclpp::LL8Packet);
-  void* scratchBuff = (void*)((char*)scratch + scratchBaseOffset);
-  size_t scratchOffset = scratchBaseOffset + rank * nPktsPerRank * sizeof(mscclpp::LL8Packet);
-  size_t scratchResultOffset =
-      (flag & 1) ? 2 * nPkts * sizeof(mscclpp::LL8Packet) : 3 * nPkts * sizeof(mscclpp::LL8Packet);
-  size_t srcOffset = remoteRank * nelemsPerRank * sizeof(int);
-  uint32_t* src = (uint32_t*)((char*)buff + rank * nelemsPerRank * sizeof(int));
-  uint32_t* dst = (uint32_t*)((char*)resultBuff + rank * nelemsPerRank * sizeof(int));
-
-  // step 1: write to scratch buffer
-  constSmChannels[peerIdx].putPackets<mscclpp::LL8Packet>(scratchOffset, srcOffset, nelemsPerRank * sizeof(int), tid,
-                                                          blockDim.x * nBlocksPerPeer, flag);
-  // step 2: get data from scratch buffer, reduce data and write result to remote scratch buffer
-  for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < nPktsPerRank; idx += blockDim.x * gridDim.x) {
-    uint32_t data = 0;
-    for (int index = 0; index < nPeers; index++) {
-      const int remoteRank = index < rank ? index : index + 1;
-      mscclpp::LL8Packet* dstPkt = (mscclpp::LL8Packet*)scratchBuff + remoteRank * nPktsPerRank;
-      uint32_t val = dstPkt[idx].read(flag);
-      data = add_vectors<T>(val, data);
-    }
-    data = add_vectors<T>(data, src[idx]);
-    dst[idx] = data;
-
-    mscclpp::LL8Packet packet;
-    packet.data = data;
-    packet.flag = flag;
-    size_t offset = scratchResultOffset / sizeof(mscclpp::LL8Packet) + (idx + rank * nPktsPerRank);
-    for (int index = 0; index < nPeers; index++) {
-      constSmChannels[index].write(offset, packet);
-    }
-  }
-  // step 3: get data result from scratch buffer
-  mscclpp::LL8Packet* dstPkt = (mscclpp::LL8Packet*)((char*)scratch + scratchResultOffset);
-  const int dstOffset = remoteRank * nPktsPerRank;
-  uint32_t* result = (uint32_t*)((char*)resultBuff + remoteRank * nelemsPerRank * sizeof(int));
-  for (int idx = threadIdx.x + localBlockIdx * blockDim.x; idx < nPktsPerRank; idx += blockDim.x * nBlocksPerPeer) {
-    uint32_t data = dstPkt[idx + dstOffset].read(flag);
-    result[idx] = data;
-  }
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     globalFlag += 1;
   }
@@ -426,7 +272,7 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, int rank, int nRanksPe
 }
 
 __global__ void __launch_bounds__(1024, 1)
-    allgather5(size_t rank, [[maybe_unused]] size_t worldSize, size_t nRanksPerNode, size_t nelemsPerGPU) {
+    allgather5(size_t rank, [[maybe_unused]] size_t worldSize, size_t nRanksPerNode, size_t nelemsPerGPU, void* smChannel) {
   const size_t nBlock = gridDim.x;
   if (blockIdx.x >= nBlock) return;
 
@@ -438,6 +284,7 @@ __global__ void __launch_bounds__(1024, 1)
   const size_t nWarp = nThread / WARP_SIZE;
   const size_t nPeer = nRanksPerNode - 1;
   const size_t chanOffset = nPeer * blockIdx.x;
+  mscclpp::DeviceHandle<mscclpp::SmChannel> *constSmChannels =  (mscclpp::DeviceHandle<mscclpp::SmChannel>*) smChannel;
   auto smChans = constSmChannels + chanOffset;
 
   if (wid < nPeer && lid == 0) {
@@ -490,10 +337,10 @@ __global__ void __launch_bounds__(1024, 1)
 
 template <typename T>
 cudaError_t allgather(T* buff, T* scratch, T* resultBuff, int rank, int nRanksPerNode, int worldSize, size_t nelems,
-                      cudaStream_t stream) {
+                      cudaStream_t stream, void* smChannel) {
   cudaError_t err = cudaMemcpyAsync(resultBuff + nelems * rank, buff, nelems * sizeof(T), cudaMemcpyDeviceToDevice, stream);
   if (err != cudaSuccess) return err;
-  allgather5<<<24, 1024, 0, stream>>>(rank, worldSize, nRanksPerNode, nelems);
+  allgather5<<<24, 1024, 0, stream>>>(rank, worldSize, nRanksPerNode, nelems, smChannel);
   return cudaGetLastError();
 }
 
@@ -749,7 +596,7 @@ NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t
   if (sendbuff == nullptr || recvbuff == nullptr || bytes == 0 || comm == nullptr) return ncclInvalidArgument;
   int rank = comm->comm->bootstrap()->getRank();
   channelKey key{sendbuff, recvbuff, bytes};
-  if (bytes <= 1 << 20) {
+  /*if (bytes <= 1 << 20) {
     auto it = comm->channelInfos.find(key);
     if (it == comm->channelInfos.end()) {
       std::vector<mscclpp::SmChannel> channels =
@@ -760,7 +607,6 @@ NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t
       ChannelInfo channelInfo{channels, {}, smChannelDeviceHandles, {}};
       it = comm->channelInfos.emplace(key, channelInfo).first;
     }
-    // TODO: if sendbuff and recvbuff don't change, we can avoid copying smChannelDeviceHandles to device
     CUDACHECK(cudaMemcpyToSymbolAsync(
         constSmChannels, it->second.smChannelDeviceHandles.data(),
         sizeof(mscclpp::DeviceHandle<mscclpp::SmChannel>) * it->second.smChannelDeviceHandles.size(), 0,
@@ -785,7 +631,6 @@ NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t
                        [](const mscclpp::SmChannel& smChannel) { return mscclpp::deviceHandle(smChannel); });
       }
     }
-    // TODO: if sendbuff and recvbuff don't change, we can avoid copying smChannelDeviceHandles to device
     CUDACHECK(cudaMemcpyToSymbolAsync(
         constSmChannels, it->second.smChannelDeviceHandles.data(),
         sizeof(mscclpp::DeviceHandle<mscclpp::SmChannel>) * it->second.smChannelDeviceHandles.size(), 0,
@@ -821,7 +666,7 @@ NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t
       break;
     default:
       return ncclInvalidArgument;
-  }
+  }*/
   return ncclSuccess;
 }
 
@@ -839,6 +684,9 @@ NCCL_API ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t
   int nRank = comm->comm->bootstrap()->getNranks();
   channelKey key{sendbuff, recvbuff, bytes};
 
+  mscclpp::DeviceHandle<mscclpp::SmChannel> *constSmChannels;
+  mscclpp::DeviceHandle<mscclpp::SmChannel> *constSmOutChannels;
+
   auto it = comm->channelInfos.find(key);
   if (it == comm->channelInfos.end()) {
     std::vector<mscclpp::RegisteredMemory> remoteMemories =
@@ -849,16 +697,24 @@ NCCL_API ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t
     std::vector<mscclpp::DeviceHandle<mscclpp::SmChannel>> smChannelDeviceHandles;
     std::transform(channels.begin(), channels.end(), std::back_inserter(smChannelDeviceHandles),
                    [](const mscclpp::SmChannel& smChannel) { return mscclpp::deviceHandle(smChannel); });
-    ChannelInfo channelInfo{channels, {}, smChannelDeviceHandles, {}};
+  
+    mscclpp::AvoidCudaGraphCaptureGuard cgcGuard;
+    cudaMalloc((void**)&constSmChannels, sizeof(mscclpp::DeviceHandle<mscclpp::SmChannel>) * smChannelDeviceHandles.size());
+    cudaMemcpy(constSmChannels, smChannelDeviceHandles.data(), sizeof(mscclpp::DeviceHandle<mscclpp::SmChannel>) * smChannelDeviceHandles.size(), cudaMemcpyHostToDevice);
+    ChannelInfo channelInfo{channels, {}, constSmChannels, {}};
     it = comm->channelInfos.emplace(key, channelInfo).first;
+
+  } else {
+	constSmChannels = (mscclpp::DeviceHandle<mscclpp::SmChannel> *) it->second.smChannelDeviceHandles;	
   }
+
   // TODO: if sendbuff and recvbuff don't change, we can avoid copying smChannelDeviceHandles to device
-  CUDACHECK(cudaMemcpyToSymbolAsync(
+  /*CUDACHECK(cudaMemcpyToSymbolAsync(
       constSmChannels, it->second.smChannelDeviceHandles.data(),
       sizeof(mscclpp::DeviceHandle<mscclpp::SmChannel>) * it->second.smChannelDeviceHandles.size(), 0,
-      cudaMemcpyHostToDevice, stream));
+      cudaMemcpyHostToDevice, stream));*/
   CUDACHECK(allgather((int*)sendbuff, (int*)comm->scratchBuff.get(), (int*)recvbuff,
-                      rank, nRanksPerNode, nRank, bytes / sizeof(int), stream));
+                      rank, nRanksPerNode, nRank, bytes / sizeof(int), stream, constSmChannels));
   return ncclSuccess;
 }
 
