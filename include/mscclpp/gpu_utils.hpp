@@ -74,8 +74,9 @@ T* cudaCalloc(size_t nelem) {
   T* ptr;
   CudaStreamWithFlags stream(cudaStreamNonBlocking);
   MSCCLPP_CUDATHROW(cudaMalloc(&ptr, nelem * sizeof(T)));
-  MSCCLPP_CUDATHROW(cudaMemsetAsync(ptr, 0, nelem * sizeof(T), stream));
-  MSCCLPP_CUDATHROW(cudaStreamSynchronize(stream));
+  //MSCCLPP_CUDATHROW(cudaMemsetAsync(ptr, 0, nelem * sizeof(T), stream));
+  //MSCCLPP_CUDATHROW(cudaStreamSynchronize(stream));
+  MSCCLPP_CUDATHROW(cudaMemset(ptr, 0, nelem * sizeof(T)));
   return ptr;
 }
 
