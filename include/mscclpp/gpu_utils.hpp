@@ -61,7 +61,11 @@ T* cudaCalloc(size_t nelem) {
   AvoidCudaGraphCaptureGuard cgcGuard;
   T* ptr;
   CudaStreamWithFlags stream(cudaStreamNonBlocking);
+#if defined(__HIP_PLATFORM_AMD__)
+  MSCCLPP_CUDATHROW(hipMalloc(&ptr, nelem * sizeof(T)));
+#else
   MSCCLPP_CUDATHROW(cudaMalloc(&ptr, nelem * sizeof(T)));
+#endif
   MSCCLPP_CUDATHROW(cudaMemsetAsync(ptr, 0, nelem * sizeof(T), stream));
   MSCCLPP_CUDATHROW(cudaStreamSynchronize(stream));
   return ptr;
