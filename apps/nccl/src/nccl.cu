@@ -168,10 +168,11 @@ NCCL_API ncclResult_t ncclGetUniqueId(ncclUniqueId* uniqueId) {
   return ncclSuccess;
 }
 
-NCCL_API ncclResult_t ncclCommInitRankConfig(ncclComm_t*, int, ncclUniqueId, int,
-                                             ncclConfig_t*) {
+NCCL_API ncclResult_t ncclCommInitRankConfig(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank,
+                                             ncclConfig_t* config) {
   // TODO: implement this function
-  return ncclInternalError;
+  //return ncclInternalError;
+  return ncclCommInitRank(comm, nranks, commId, rank);
 }
 
 NCCL_API ncclResult_t ncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank) {
@@ -269,7 +270,11 @@ NCCL_API const char* ncclGetErrorString(ncclResult_t result) {
 
 NCCL_API const char* ncclGetLastError(ncclComm_t) {
   // TODO: implement this function
-  return nullptr;
+  
+  //return nullptr;
+  char *s = "success";
+  return s;
+
 }
 
 NCCL_API ncclResult_t ncclCommGetAsyncError(ncclComm_t, ncclResult_t* asyncError) {
