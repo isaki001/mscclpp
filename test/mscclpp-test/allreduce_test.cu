@@ -1038,7 +1038,7 @@ __global__ void allreduce7(int* buff, int* scratch, void* resultBuff, int rank, 
   // This version of allreduce only works for single nodes
   const int nPeers = nRanksPerNode - 1;
   const size_t nPkts = nelems;
-  const int nelemsPerRank = nelems / worldSize;
+  const int nelemsPerRank = (nelems < 8) ? nelems: nelems / worldSize;
   const int nPktsPerRank = nelemsPerRank;
   // flag for packets. Initially 1
   const uint32_t flag = (uint32_t)globalFlag;
@@ -1057,7 +1057,13 @@ __global__ void allreduce7(int* buff, int* scratch, void* resultBuff, int rank, 
   size_t srcOffset = remoteRank * nelemsPerRank * sizeof(int);
   uint32_t* src = (uint32_t*)((char*)buff + rank * nelemsPerRank * sizeof(int));
   uint32_t* dst = (uint32_t*)((char*)resultBuff + rank * nelemsPerRank * sizeof(int));
+  uint32_t* result = (uint32_t*)((char*)resultBuff + remoteRank * nelemsPerRank * sizeof(int));
 
+  if (nelems < 8) {
+	srcOffset = 0;
+	src = (uint32_t*)((char*)buff);
+	result = (uint32_t*)((char*)resultBuff);
+  }
   // step 1: write to scratch buffer
   constSmOutOfPlaceChans[peerIdx].putPackets<mscclpp::LL8Packet>(scratchOffset, srcOffset, nelemsPerRank * sizeof(int),
                                                                  tid, blockDim.x * nBlocksPerPeer, flag);
@@ -1071,23 +1077,28 @@ __global__ void allreduce7(int* buff, int* scratch, void* resultBuff, int rank, 
       data += val;
     }
     data += src[idx];
-    dst[idx] = data;
 
-    mscclpp::LL8Packet packet;
-    packet.data = data;
-    packet.flag = flag;
-    size_t offset = scratchResultOffset / sizeof(mscclpp::LL8Packet) + (idx + rank * nPktsPerRank);
-    for (int index = 0; index < nPeers; index++) {
-      constSmOutOfPlaceChans[index].write(offset, packet);
+    if (nelems < 8) {
+	result[idx] = data;
+    } else {
+    	dst[idx] = data;
+    	mscclpp::LL8Packet packet;
+    	packet.data = data;
+    	packet.flag = flag;
+    	size_t offset = scratchResultOffset / sizeof(mscclpp::LL8Packet) + (idx + rank * nPktsPerRank);
+    	for (int index = 0; index < nPeers; index++) {
+      		constSmOutOfPlaceChans[index].write(offset, packet);
+    	}
     }
   }
-  // step 3: get data result from scratch buffer
-  mscclpp::LL8Packet* dstPkt = (mscclpp::LL8Packet*)((char*)scratch + scratchResultOffset);
-  const int dstOffset = remoteRank * nPktsPerRank;
-  uint32_t* result = (uint32_t*)((char*)resultBuff + remoteRank * nelemsPerRank * sizeof(int));
-  for (int idx = threadIdx.x + localBlockIdx * blockDim.x; idx < nPktsPerRank; idx += blockDim.x * nBlocksPerPeer) {
-    uint32_t data = dstPkt[idx + dstOffset].read(flag);
-    result[idx] = data;
+  if (nelems >= 8) {
+  	// step 3: get data result from scratch buffer
+  	mscclpp::LL8Packet* dstPkt = (mscclpp::LL8Packet*)((char*)scratch + scratchResultOffset);
+  	const int dstOffset = remoteRank * nPktsPerRank;
+  	for (int idx = threadIdx.x + localBlockIdx * blockDim.x; idx < nPktsPerRank; idx += blockDim.x * nBlocksPerPeer) {
+    		uint32_t data = dstPkt[idx + dstOffset].read(flag);
+    		result[idx] = data;
+  	}
   }
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     globalFlag += 1;

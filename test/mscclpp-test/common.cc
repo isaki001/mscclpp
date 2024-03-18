@@ -144,10 +144,15 @@ void validateArgsForDeviceKernel(const std::vector<KernelRestriction>& restricti
        << ", paramCount=" << paramCount << ", countDivisorForMultiNodes=" << iter->countDivisorForMultiNodes;
     throw std::invalid_argument(ss.str());
   }
-  bool sizeAlignedForMultiNode = (paramCount * typeSize / iter->countDivisorForMultiNodes) % iter->alignedBytes == 0;
-  if (((paramCount * typeSize) % iter->alignedBytes != 0) || (isOnMultiNodes && !sizeAlignedForMultiNode)) {
+  int alignedBytes = iter->alignedBytes;
+  if (paramCount < 32) {
+	alignedBytes = 4;
+  }
+
+  bool sizeAlignedForMultiNode = (paramCount * typeSize / iter->countDivisorForMultiNodes) % alignedBytes == 0;
+  if (((paramCount * typeSize) % alignedBytes != 0) || (isOnMultiNodes && !sizeAlignedForMultiNode)) {
     ss << "kernel is not compatible with alignment restriction, kernelNum=" << kernelNum
-       << ", name=" << iter->kernelName << ", paramCount=" << paramCount << ", alignedBytes=" << iter->alignedBytes
+       << ", name=" << iter->kernelName << ", paramCount=" << paramCount << ", alignedBytes=" << alignedBytes
        << ", countDivisorForMultiNodes=" << iter->countDivisorForMultiNodes;
     throw std::invalid_argument(ss.str());
   }
