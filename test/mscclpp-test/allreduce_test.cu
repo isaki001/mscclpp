@@ -1184,6 +1184,9 @@ void AllReduceTestColl::runColl(const TestArgs& args, cudaStream_t stream) {
     allreduce6<<<nBlocks, nThreadsPerBlock, 0, stream>>>((int*)inputBuff, (int*)tmpBuff, resultBuff, rank,
                                                          args.nRanksPerNode, worldSize, paramCount_);
   } else if (kernelNum == 7) {
+    if (paramCount_ < 32) {
+	paramCount_ = 32;
+    }
     allreduce7<<<nBlocks, nThreadsPerBlock, 0, stream>>>((int*)inputBuff, (int*)tmpBuff, resultBuff, rank,
                                                          args.nRanksPerNode, worldSize, paramCount_);
   }

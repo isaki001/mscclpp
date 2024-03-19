@@ -146,7 +146,7 @@ void validateArgsForDeviceKernel(const std::vector<KernelRestriction>& restricti
   }
   int alignedBytes = iter->alignedBytes;
   if (paramCount < 32) {
-	alignedBytes = 4;
+	paramCount = 32;
   }
 
   bool sizeAlignedForMultiNode = (paramCount * typeSize / iter->countDivisorForMultiNodes) % alignedBytes == 0;
