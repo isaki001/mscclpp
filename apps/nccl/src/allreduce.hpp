@@ -131,6 +131,7 @@ __global__ void __launch_bounds__(1024, 1)
     allreduce6(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels, int rank,
                int nRanksPerNode, int worldSize, size_t nelems, uint32_t flag) {
   // This version of allreduce only works for single nodes
+  nRanksPerNode = min(worldSize, nRanksPerNode);        /*TODO: needs a proper fix */
   if (worldSize != nRanksPerNode) return;
   nelems = nelems / (sizeof(int) / sizeof(T));
   const int nPeers = nRanksPerNode - 1;
@@ -269,6 +270,7 @@ __global__ void __launch_bounds__(1024, 1)
     allreduce7(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels, int rank,
                int nRanksPerNode, int worldSize, size_t nelems, uint32_t flag) {
   // This version of allreduce only works for single nodes
+  nRanksPerNode = min(worldSize, nRanksPerNode);        /*TODO: needs a proper fix */
   if (worldSize != nRanksPerNode) return;
   nelems = nelems / (sizeof(int) / sizeof(T));
   const int nPeers = nRanksPerNode - 1;
@@ -468,10 +470,10 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
   static uint32_t flag = 1;
 #if defined(__HIP_PLATFORM_AMD__)
   if (sizeof(T) * nelems <= (1 << 20)) {
-    int nBlocks = 28;
+    int nBlocks = 4 * (min(worldSize, nRanksPerNode) - 1);
     int nThreadsPerBlock = 1024;
     if (nelems >= 8192) {
-      nBlocks = 56;
+      nBlocks = 8 * (min(worldSize, nRanksPerNode) - 1);
       nThreadsPerBlock = (nelems <= 76800) ? 512 : 1024;
     }
     allreduce7<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, rank, nRanksPerNode,
