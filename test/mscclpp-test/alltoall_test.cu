@@ -54,7 +54,7 @@ class AllToAllTestColl : public BaseTestColl {
   ~AllToAllTestColl() override = default;
 
   void runColl(const TestArgs& args, cudaStream_t stream) override;
-  void initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff) override;
+  void initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff, std::vector<void*> tmpBuff) override;
   void getBw(const double deltaSec, double& algBw /*OUT*/, double& busBw /*OUT*/) override;
   void setupCollTest(size_t size) override;
   std::vector<KernelRestriction> getKernelRestrictions() override;
@@ -74,7 +74,7 @@ void AllToAllTestColl::runColl(const TestArgs& args, cudaStream_t stream) {
   }
 }
 
-void AllToAllTestColl::initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff) {
+void AllToAllTestColl::initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff, std::vector<void*> tmpBuff) {
   if (sendBuff.size() != 1) std::runtime_error("unexpected error");
   const int rank = args.rank;
   std::vector<int> dataHost(recvCount_, 0);
@@ -125,6 +125,8 @@ class AllToAllTestEngine : public BaseTestEngine {
   void setupConnections() override;
 
   std::vector<void*> getSendBuff() override;
+  std::vector<void*> getTmpBuff() override;
+
   void* getRecvBuff() override;
   void* getScratchBuff() override;
 
@@ -159,6 +161,8 @@ void AllToAllTestEngine::setupConnections() {
 }
 
 std::vector<void*> AllToAllTestEngine::getSendBuff() { return {sendBuff_.get()}; }
+std::vector<void*> AllToAllTestEngine::getTmpBuff() { return {sendBuff_.get()}; }
+
 void* AllToAllTestEngine::getExpectedBuff() { return expectedBuff_.get(); }
 void* AllToAllTestEngine::getRecvBuff() { return recvBuff_.get(); }
 void* AllToAllTestEngine::getScratchBuff() { return nullptr; }

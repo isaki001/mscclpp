@@ -1098,7 +1098,7 @@ class AllReduceTestColl : public BaseTestColl {
   ~AllReduceTestColl() = default;
 
   void runColl(const TestArgs& args, cudaStream_t stream) override;
-  void initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff) override;
+  void initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff, std::vector<void*> tmpBuff) override;
   void getBw(const double deltaSec, double& algBw /*OUT*/, double& busBw /*OUT*/) override;
   void setupCollTest(size_t size) override;
   std::vector<KernelRestriction> getKernelRestrictions() override;
@@ -1172,7 +1172,7 @@ void AllReduceTestColl::runColl(const TestArgs& args, cudaStream_t stream) {
   }
 }
 
-void AllReduceTestColl::initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff) {
+void AllReduceTestColl::initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff, std::vector<void*> tmpBuff) {
   if (sendBuff.size() != 1) std::runtime_error("unexpected error");
   const int rank = args.rank;
   const int worldSize = args.totalRanks;
@@ -1238,6 +1238,8 @@ class AllReduceTestEngine : public BaseTestEngine {
   bool isInPlace() const;
 
   std::vector<void*> getSendBuff() override;
+  std::vector<void*> getTmpBuff() override;
+
   void* getRecvBuff() override;
   void* getScratchBuff() override;
 
@@ -1392,6 +1394,7 @@ void AllReduceTestEngine::setupConnections() {
 }
 
 std::vector<void*> AllReduceTestEngine::getSendBuff() { return {inputBuff_.get()}; }
+std::vector<void*> AllReduceTestEngine::getTmpBuff() { return {inputBuff_.get()}; }
 
 void* AllReduceTestEngine::getExpectedBuff() { return expectedBuff_.get(); }
 

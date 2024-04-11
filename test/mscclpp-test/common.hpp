@@ -51,7 +51,7 @@ class BaseTestColl {
  public:
   BaseTestColl() {}
   virtual ~BaseTestColl() {}
-  virtual void initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff) = 0;
+  virtual void initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff, std::vector<void*> tmpBuff) = 0;
   virtual std::vector<KernelRestriction> getKernelRestrictions() = 0;
   virtual void runColl(const TestArgs& args, cudaStream_t stream) = 0;
   virtual void getBw(const double deltaSec, double& algBw /*OUT*/, double& busBw /*OUT*/) = 0;
@@ -92,6 +92,8 @@ class BaseTestEngine {
   size_t checkData();
 
   virtual std::vector<void*> getSendBuff() = 0;
+  virtual std::vector<void*> getTmpBuff() = 0;
+
   virtual void* getRecvBuff() = 0;
   virtual void* getScratchBuff() = 0;
 

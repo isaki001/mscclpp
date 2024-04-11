@@ -58,7 +58,7 @@ class SendRecvTestColl : public BaseTestColl {
   ~SendRecvTestColl() override = default;
 
   void runColl(const TestArgs& args, cudaStream_t stream) override;
-  void initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff) override;
+  void initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff, std::vector<void*> tmpBuff) override;
   void getBw(const double deltaSec, double& algBw /*OUT*/, double& busBw /*OUT*/) override;
   void setupCollTest(size_t size) override;
   std::vector<KernelRestriction> getKernelRestrictions() override;
@@ -85,7 +85,7 @@ std::vector<KernelRestriction> SendRecvTestColl::getKernelRestrictions() {
           {0, "sendrecv0", false, 1, 16 /*use ulong2 to transfer data*/}};
 }
 
-void SendRecvTestColl::initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff) {
+void SendRecvTestColl::initData(const TestArgs& args, std::vector<void*> sendBuff, void* expectedBuff, std::vector<void*> tmpBuff) {
   int rank = args.rank;
   if (sendBuff.size() != 1) std::runtime_error("unexpected error");
   MSCCLPP_CUDATHROW(cudaMemset(sendBuff[0], 0, sendCount_ * typeSize_));
@@ -123,6 +123,8 @@ class SendRecvTestEngine : public BaseTestEngine {
   void setupConnections() override;
 
   std::vector<void*> getSendBuff() override;
+  std::vector<void*> getTmpBuff() override;
+
   void* getRecvBuff() override;
   void* getScratchBuff() override;
 
@@ -195,6 +197,7 @@ void SendRecvTestEngine::setupConnections() {
 }
 
 std::vector<void*> SendRecvTestEngine::getSendBuff() { return {devicePtrs_[0].get()}; }
+std::vector<void*> SendRecvTestEngine::getTmpBuff() { return {devicePtrs_[0].get()}; }
 
 void* SendRecvTestEngine::getExpectedBuff() { return expectedBuff_.get(); }
 

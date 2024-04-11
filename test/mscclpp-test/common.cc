@@ -259,7 +259,7 @@ void BaseTestEngine::runTest() {
   for (size_t size = args_.minBytes; size <= args_.maxBytes;
        size = ((args_.stepFactor > 1) ? size * args_.stepFactor : size + args_.stepBytes)) {
     coll_->setupCollTest(args_, size);
-    this->coll_->initData(this->args_, this->getSendBuff(), this->getExpectedBuff());
+    this->coll_->initData(this->args_, this->getSendBuff(), this->getExpectedBuff(), this->getTmpBuff());
 
     ss << std::setw(12) << std::max(coll_->getSendBytes(), coll_->getExpectedBytes()) << "  " << std::setw(12)
        << coll_->getParamBytes() / sizeof(int);
@@ -271,7 +271,7 @@ void BaseTestEngine::runTest() {
     size_t nErrors = 0;
     if (args_.reportErrors) {
       this->coll_->setupCollTest(args_, size);
-      this->coll_->initData(this->args_, this->getSendBuff(), this->getExpectedBuff());
+      this->coll_->initData(this->args_, this->getSendBuff(), this->getExpectedBuff(), this->getTmpBuff());
       this->barrier();
       this->coll_->runColl(args_, stream_);
       CUDATHROW(cudaDeviceSynchronize());
@@ -369,11 +369,12 @@ void BaseTestEngine::setupMeshConnectionsInternal(
   const mscclpp::Transport ibTransport = IBs[args_.gpuNum];
   std::vector<mscclpp::NonblockingFuture<std::shared_ptr<mscclpp::Connection>>> connectionFutures;
 
+  printf("In mesh connection internal\n");
   auto rankToNode = [&](int rank) { return rank / nRanksPerNode; };
   for (int r = 0; r < worldSize; r++) {
-    if (r == rank) {
+    /*if (r == rank) {
       continue;
-    }
+    }*/
     if (addConnections) {
       mscclpp::Transport transport;
       if (rankToNode(r) == thisNode) {
@@ -406,6 +407,21 @@ void BaseTestEngine::setupMeshConnections(std::vector<DeviceHandle<mscclpp::Simp
     outputBufRegMem = comm_->registerMemory(outputBuff, outputBuffBytes, allTransports);
   }
 
+  /*void *tmpBuff;
+  hipExtMallocWithFlags((void**)&tmpBuff, outputBuffBytes, hipDeviceMallocUncached);
+  hipMemcpy(tmpBuff, inputBuff, inputBuffBytes, hipMemcpyDeviceToDevice);
+  mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(tmpBuff, inputBuffBytes, allTransports);*/
+
+  //std::vector<int> dataHost(std::max(inputBuffBytes, outputBuffBytes), 0);
+  //CUDATHROW(cudaMemcpy(dataHost.data(), inputBuff, inputBuffBytes, cudaMemcpyDeviceToHost));
+  //CUDATHROW(cudaMemcpy(dataHost.data(), tmpBuff, inputBuffBytes, cudaMemcpyDeviceToHost));
+
+  //mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(tmpBuff, outputBuffBytes, allTransports);
+
+  /*for (int i = 0; i < 10; i++) {
+	printf(" i = %d, val = %d\n", i, dataHost[i]);
+  }*/
+  printf("In proxyChannel setup mesh\n");
   std::vector<std::shared_ptr<mscclpp::Connection>> connections;
   std::vector<mscclpp::NonblockingFuture<mscclpp::RegisteredMemory>> remoteRegMemories;
   mscclpp::RegisteredMemory& localRegMemory = (outputBuff) ? outputBufRegMem : inputBufRegMem;
@@ -436,7 +452,7 @@ void BaseTestEngine::setupMeshConnections(std::vector<mscclpp::SmChannel>& smCha
   if (outputBuff) {
     outputBufRegMem = comm_->registerMemory(outputBuff, outputBuffBytes, allTransports);
   }
-
+  printf("In smchannel setup mesh\n");
   std::vector<std::shared_ptr<mscclpp::Connection>> connections;
   std::vector<mscclpp::NonblockingFuture<mscclpp::RegisteredMemory>> remoteRegMemories;
   mscclpp::RegisteredMemory& localRegMemory =
@@ -474,6 +490,14 @@ void BaseTestEngine::setupMeshConnections(std::vector<mscclpp::SmChannel>& smCha
   mscclpp::RegisteredMemory putPacketBufRegMem;
   mscclpp::RegisteredMemory getPacketBufRegMem;
   mscclpp::RegisteredMemory outputBufRegMem;
+
+  void *tmpBuff;
+
+  printf("In desired setupMesh\n");
+  hipExtMallocWithFlags((void**)&tmpBuff, outputBuffBytes, hipDeviceMallocUncached);
+  hipMemcpy(tmpBuff, inputBuff, inputBuffBytes, hipMemcpyDeviceToDevice); 
+  //mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(tmpBuff, outputBuffBytes, allTransports); 
+
   if (putPacketBuff) {
     putPacketBufRegMem = comm_->registerMemory(putPacketBuff, putPacketBuffBytes, allTransports);
   }
