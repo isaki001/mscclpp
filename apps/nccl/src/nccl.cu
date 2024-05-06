@@ -391,6 +391,9 @@ NCCL_API ncclResult_t ncclReduceScatter(const void*, void*, size_t, ncclDataType
 
 NCCL_API ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                     ncclComm_t comm, cudaStream_t stream) {
+  if (sendcount < 1) {
+	  return ncclSuccess;
+  }
   size_t bytes = sendcount * ncclTypeSize(datatype);
   if (sendbuff == nullptr || recvbuff == nullptr || bytes == 0 || comm == nullptr) return ncclInvalidArgument;
   int rank = comm->comm->bootstrap()->getRank();
