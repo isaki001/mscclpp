@@ -49,8 +49,10 @@ union alignas(16) LL16Packet {
 #else  // !defined(MSCCLPP_DEVICE_CUDA)
     uint4 reg = make_uint4(val1, flag, val2, flag);
     ulonglong2* p = reinterpret_cast<ulonglong2*>(&reg);
-    atomicStore(&(raw_.x), p->x, memoryOrderRelaxed);
-    atomicStore(&(raw_.y), p->y, memoryOrderRelaxed);
+    /*atomicStore(&(raw_.x), p->x, memoryOrderRelaxed);
+    atomicStore(&(raw_.y), p->y, memoryOrderRelaxed);*/
+    __builtin_nontemporal_store(p->x, &(raw_.x));
+    __builtin_nontemporal_store(p->y, &(raw_.y));
 #endif
   }
 
@@ -87,7 +89,27 @@ union alignas(16) LL16Packet {
   /// @return The 8-byte data read.
   MSCCLPP_DEVICE_INLINE uint2 read(uint32_t flag, int64_t maxSpinCount = 100000000) const {
     uint2 data;
-    POLL_MAYBE_JAILBREAK(readOnce(flag, data), maxSpinCount);
+    //POLL_MAYBE_JAILBREAK(readOnce(flag, data), maxSpinCount);
+    int64_t spins = 0;
+    ulonglong2 reg;
+    uint4* ptr;
+    uint32_t abort = 0;
+    uint32_t abortFlag = 0;
+    do {
+        reg.x = __builtin_nontemporal_load(&(raw_.x));
+        reg.y = __builtin_nontemporal_load(&(raw_.y));
+        ptr = reinterpret_cast<uint4*>(&reg);
+        if (spins >= maxSpinCount) {
+		abort = __atomic_load_n(&abortFlag, __ATOMIC_SEQ_CST);
+		if (abort) {
+			spins = 0;
+			break;
+		}
+	}
+        spins++;
+    } while ((ptr->y != flag) || (ptr->w != flag));
+    data.x = ptr->x;
+    data.y = ptr->z;
     return data;
   }
 
@@ -120,7 +142,9 @@ union alignas(8) LL8Packet {
 #else  // !defined(MSCCLPP_DEVICE_CUDA)
     uint2 reg = make_uint2(val, flag);
     uint64_t* p = reinterpret_cast<uint64_t*>(&reg);
-    atomicStore(&(raw_), *p, memoryOrderRelaxed);
+    //atomicStore(&(raw_), *p, memoryOrderRelaxed);
+    __builtin_nontemporal_store(*p, &(raw_));
+    //__builtin_nontemporal_store(p->y, &(raw_.y));
 #endif
   }
 
@@ -138,9 +162,32 @@ union alignas(8) LL8Packet {
 #endif
   }
 
+
   MSCCLPP_DEVICE_INLINE uint32_t read(uint32_t flag, int64_t maxSpinCount = 1000000) const {
     uint32_t data;
-    POLL_MAYBE_JAILBREAK(readOnce(flag, data), maxSpinCount);
+    //POLL_MAYBE_JAILBREAK(readOnce(flag, data), maxSpinCount);
+    int64_t spins = 0;
+    //ulonglong2 reg;
+    uint64_t reg;
+    uint2* ptr;
+    uint32_t abort = 0;
+    uint32_t abortFlag = 0;
+    do {
+        reg = __builtin_nontemporal_load(&(raw_));
+        //reg.y = __builtin_nontemporal_load(&(raw_.y));
+        ptr = reinterpret_cast<uint2*>(&reg);
+        if (spins >= maxSpinCount) {
+                abort = __atomic_load_n(&abortFlag, __ATOMIC_SEQ_CST);
+                if (abort) {
+			spins = 0;
+                        break;
+		}
+        }
+        spins++;
+    } while ((ptr->y != flag));
+    data = ptr->x;
+    //data.y = ptr->z;
+
     return data;
   }
 
