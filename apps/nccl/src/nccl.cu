@@ -49,7 +49,9 @@ struct hash<channelKey> {
 
 struct ChannelInfo {
   std::vector<mscclpp::SmChannel> smChannels;
+  std::vector<mscclpp::SmChannel> smChannels1;
   std::shared_ptr<mscclpp::DeviceHandle<mscclpp::SmChannel>> smChannelDeviceHandles;
+  std::shared_ptr<mscclpp::DeviceHandle<mscclpp::SmChannel>> smChannelDeviceHandles1;
 };
 
 struct ncclComm {
@@ -215,25 +217,38 @@ static ncclResult_t ncclAllReduceFallback(const void* sendbuff, void* recvbuff, 
   mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels = nullptr;
   mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels = nullptr;
 
+  //printf("largeSize = %ld\n", comm->largeMessageSizeBoundary);
   // Creating the channels
   if (count * ncclTypeSize(datatype) <= comm->largeMessageSizeBoundary) {
     auto sendIt = comm->channelScratchInfos.find(sendKey);
     if (sendIt == comm->channelScratchInfos.end()) {
       std::vector<mscclpp::SmChannel> channels =
           setupSmChannels(comm, comm->remoteScratchRegMemories, const_cast<void*>((void*)sendBasePtr));
-      ChannelInfo channelInfo{channels, setupSmChannelDeviceHandles(channels)};
+      std::vector<mscclpp::RegisteredMemory> remoteMemories1;
+      remoteMemories1 =
+          setupRemoteMemories(comm->comm, rank, (void*)sendBasePtr, sendBytes, mscclpp::Transport::CudaIpc);
+
+      std::vector<mscclpp::SmChannel> channels1 =
+          setupSmChannels(comm, remoteMemories1, const_cast<void*>((void*)sendBasePtr));
+      ChannelInfo channelInfo{channels, channels1, setupSmChannelDeviceHandles(channels), setupSmChannelDeviceHandles(channels1)};
       sendIt = comm->channelScratchInfos.emplace(sendKey, channelInfo).first;
     }
 
     smChannels = sendIt->second.smChannelDeviceHandles.get();
   } else {
     std::vector<mscclpp::RegisteredMemory> remoteMemories;
+    std::vector<mscclpp::RegisteredMemory> remoteMemories1;
 
     auto sendIt = comm->channelInInfos.find(sendKey);
     if (sendIt == comm->channelInInfos.end()) {
       std::vector<mscclpp::SmChannel> channels =
           setupSmChannels(comm, comm->remoteScratchRegMemories, const_cast<void*>((void*)sendBasePtr));
-      ChannelInfo channelInfo{channels, setupSmChannelDeviceHandles(channels)};
+      remoteMemories1 =
+          setupRemoteMemories(comm->comm, rank, (void*)sendBasePtr, sendBytes, mscclpp::Transport::CudaIpc);
+      std::vector<mscclpp::SmChannel> channels1 =
+          setupSmChannels(comm, remoteMemories1, const_cast<void*>((void*)sendBasePtr));
+
+      ChannelInfo channelInfo{channels, channels1, setupSmChannelDeviceHandles(channels), setupSmChannelDeviceHandles(channels1)};
       sendIt = comm->channelInInfos.emplace(sendKey, channelInfo).first;
     }
 
@@ -243,11 +258,11 @@ static ncclResult_t ncclAllReduceFallback(const void* sendbuff, void* recvbuff, 
           setupRemoteMemories(comm->comm, rank, (void*)recvBasePtr, recvBytes, mscclpp::Transport::CudaIpc);
       std::vector<mscclpp::SmChannel> outChannels =
           setupSmChannels(comm, remoteMemories, const_cast<void*>((void*)recvBasePtr));
-      ChannelInfo channelInfo{outChannels, setupSmChannelDeviceHandles(outChannels)};
+      ChannelInfo channelInfo{outChannels, outChannels, setupSmChannelDeviceHandles(outChannels), setupSmChannelDeviceHandles(outChannels)};
       recvIt = comm->channelOutInfos.emplace(recvKey, channelInfo).first;
     }
 
-    smChannels = sendIt->second.smChannelDeviceHandles.get();
+    smChannels = sendIt->second.smChannelDeviceHandles1.get();
     smOutChannels = recvIt->second.smChannelDeviceHandles.get();
   }
 
@@ -550,7 +565,7 @@ NCCL_API ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t
     std::vector<mscclpp::DeviceHandle<mscclpp::SmChannel>> smChannelDeviceHandles;
     std::transform(channels.begin(), channels.end(), std::back_inserter(smChannelDeviceHandles),
                    [](const mscclpp::SmChannel& smChannel) { return mscclpp::deviceHandle(smChannel); });
-    ChannelInfo channelInfo{channels, setupSmChannelDeviceHandles(channels)};
+    ChannelInfo channelInfo{channels, channels, setupSmChannelDeviceHandles(channels), setupSmChannelDeviceHandles(channels)};
     it = comm->channelOutInfos.emplace(recvKey, channelInfo).first;
   }
 

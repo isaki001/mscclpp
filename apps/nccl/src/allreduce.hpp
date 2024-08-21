@@ -387,6 +387,67 @@ __global__ void __launch_bounds__(512, 1)
 }
 
 template <typename T>
+__global__ void __launch_bounds__(1024, 1)
+    allreduce9(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels, 
+	mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels, size_t channelDataOffset, size_t channelScratchOffset, 
+	size_t channelOutOffset, int rank, int nRanksPerNode, int worldSize, size_t nelems, uint32_t flag) {
+
+    if (worldSize != nRanksPerNode) return;
+    const int nPeers = nRanksPerNode - 1;
+    const int nelemsPerRank = nelems / worldSize;
+    const size_t nInt4 = nelems * sizeof(T) / sizeof(int4);
+    const size_t nInt4PerRank = nInt4 / worldSize;
+
+    const int nBlocksPerPeer = gridDim.x / nPeers;
+    const int localBlockIdx = blockIdx.x % nBlocksPerPeer;
+    const int peerIdx = blockIdx.x / nBlocksPerPeer;
+    const int remoteRank = peerIdx < rank ? peerIdx : peerIdx + 1;
+
+    const int tid = threadIdx.x + localBlockIdx * blockDim.x;
+    uint32_t* src = (uint32_t*)((char*)buff + rank * nelemsPerRank * sizeof(int));
+    uint32_t* dst = (uint32_t*)((char*)resultBuff + rank * nelemsPerRank * sizeof(int));
+
+    // Put channels into shared memory, read channel info from global memory is unexpectable slow.
+    __shared__ mscclpp::DeviceHandle<mscclpp::SmChannel> channels[NRANKS_PER_NODE - 1];
+    __shared__ mscclpp::DeviceHandle<mscclpp::SmChannel> outChannels[NRANKS_PER_NODE - 1];
+    const int lid = tid % WARP_SIZE;
+    if (lid < nPeers) {
+    	channels[lid] = smChannels[lid];
+    	outChannels[lid] = smOutChannels[lid];
+    }
+    __syncwarp();
+
+    const int tid1 = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (tid1 < nPeers) {
+    	channels[tid1].signal();
+    	outChannels[tid1].signal();
+    }
+    const int waitStart = gridDim.x * blockDim.x - nPeers;
+    if (tid1 >= waitStart && tid1 < (int)(gridDim.x * blockDim.x)) {
+    	channels[tid1 - waitStart].wait();
+    	outChannels[tid1 - waitStart].wait();
+    }
+
+    deviceSyncer.sync(gridDim.x);
+
+    for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < nelemsPerRank; idx += blockDim.x * gridDim.x) {
+    	uint32_t data = 0;
+    	for (int index = 0; index < nPeers; index++) {
+      		const int remoteRank = index < rank ? index : index + 1;
+      		uint32_t val = channels[index].read<uint32_t>(nelemsPerRank * rank + channelDataOffset/sizeof(int) + idx);
+      		data = add_vectors<T>(val, data);
+    	}
+    	data = add_vectors<T>(data, src[idx]);
+    	dst[idx] = data;
+    	for (int index = 0; index < nPeers; index++) {
+      		outChannels[index].write<uint32_t>(nelemsPerRank * rank + channelOutOffset/sizeof(int) + idx, data);
+    	}
+    }
+  
+ }
+
+template <typename T>
 cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels,
                       mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels, size_t channelInOffset,
                       size_t channelOutOffset, size_t channelScratchOffset, int rank, int nRanksPerNode, int worldSize,
@@ -403,18 +464,23 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
     int nBlocks = 28;
     int nThreadsPerBlock = 1024;
     if (nelems >= 8192) {
-      nBlocks = 35;
+      nBlocks = 56;
       nThreadsPerBlock = (nelems <= 76800) ? 512 : 1024;
     }
     allreduce7<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, channelInOffset,
                                                          channelScratchOffset, rank, nRanksPerNode, worldSize, nelems,
                                                          flag++);
   } else {
-    int nBlocks = 35;
+    /*int nBlocks = 35;
     int nThreadsPerBlock = 512;
     allreduce8<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels,
                                                          channelOutOffset, channelScratchOffset, rank, nRanksPerNode,
-                                                         worldSize, nelems);
+                                                         worldSize, nelems);*/
+    int nBlocks = 32;
+    int nThreadsPerBlock = 1024;
+    allreduce9<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels, channelInOffset,
+                                                         channelScratchOffset, channelOutOffset, rank, nRanksPerNode, worldSize, 
+							 nelems, flag++);
   }
 
   return cudaGetLastError();
