@@ -641,19 +641,11 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
                                                          flag++);
   } else {
 
-    if (worldSize == NRANKS_PER_NODE && (sizeof(T) * nelems < (1 << 30))) {
-	int nBlocks = 5 * (nRanksPerNode - 1);
-        int nThreadsPerBlock = 1024;
-	allreduce10<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smScrChannels, smOutChannels,
-                                                         channelOutOffset, channelScratchOffset, rank, nRanksPerNode,
-                                                         worldSize, nelems);
-    } else {
     	int nBlocks = 5 * (nRanksPerNode - 1);
     	int nThreadsPerBlock = 512;
     	allreduce8<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels,
                                                          channelOutOffset, channelScratchOffset, rank, nRanksPerNode,
     	                                                    worldSize, nelems);
-    }
     /*int nBlocks = 32;
     int nThreadsPerBlock = 1024;
     allreduce9<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels, channelInOffset,
