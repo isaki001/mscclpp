@@ -310,6 +310,8 @@ __global__ void __launch_bounds__(512, 1)
   }
   __syncwarp();
 
+//  deviceSyncer.sync(gridDim.x);
+
   // we can use double buffering to hide synchronization overhead
   for (size_t itr = 0; itr < nItrs; itr++) {
     if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
@@ -341,6 +343,12 @@ __global__ void __launch_bounds__(512, 1)
                                    data);
       }
     }
+    /*if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+      outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();
+    }
+    __syncthreads();*/
+
     offsetOfThisBlock += nInt4PerChunk;
   }
   if (restNInt4 > 0) {
@@ -374,6 +382,13 @@ __global__ void __launch_bounds__(512, 1)
       }
     }
   }
+
+  if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+      outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();
+  }
+  __syncthreads();
+
 }
 
 template <typename T>
@@ -510,7 +525,9 @@ __global__ void __launch_bounds__(1024, 1)
       }
       scratch4[nInt4PerRank * localRank + idx + offsetOfThisBlock] = data;
     }
-
+   
+    //deviceSyncer.sync(gridDim.x);
+    
     if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
       outChannels[threadIdx.x].signal();
       outChannels[threadIdx.x].wait();
@@ -532,11 +549,11 @@ __global__ void __launch_bounds__(1024, 1)
 
       resultBuff4[nInt4PerRank * localRank + idx + offsetOfThisBlock] = data;
     }
-     /*if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
       outChannels[threadIdx.x].signal();
       outChannels[threadIdx.x].wait();
     }
-    __syncthreads();*/
+    __syncthreads();
 
     for (size_t idx = threadIdx.x; idx < nInt4PerChunk; idx += blockDim.x) {
       int4 data = resultBuff4[nInt4PerRank * localRank + idx + offsetOfThisBlock];
@@ -592,11 +609,11 @@ __global__ void __launch_bounds__(1024, 1)
       resultBuff4[nInt4PerRank * localRank + idx + offsetOfThisBlock] = data;
     }
 
-    /*if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
       outChannels[threadIdx.x].signal();
       outChannels[threadIdx.x].wait();
     }
-    __syncthreads();*/
+    __syncthreads();
 
     for (size_t idx = threadIdx.x; idx < restNInt4; idx += blockDim.x) {
       int4 data = resultBuff4[nInt4PerRank * localRank + idx + offsetOfThisBlock];
@@ -609,6 +626,12 @@ __global__ void __launch_bounds__(1024, 1)
       }
     }
   }
+  if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+      outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();
+  }
+  __syncthreads();
+
 }
 
 
