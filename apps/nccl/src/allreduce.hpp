@@ -328,7 +328,7 @@ __global__ void __launch_bounds__(512, 1)
         data = add_vectors<T>(val, data);
       }
       resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock] = data;
-    }
+    /*}
 
     if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
       outChannels[threadIdx.x].signal();
@@ -336,18 +336,18 @@ __global__ void __launch_bounds__(512, 1)
     }
     __syncthreads();
 
-    for (size_t idx = threadIdx.x; idx < nInt4PerChunk; idx += blockDim.x) {
-      int4 data = resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
+    for (size_t idx = threadIdx.x; idx < nInt4PerChunk; idx += blockDim.x) {*/
+      //int4 data = resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
       for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
         outChannels[peerIdx].write(nInt4PerRank * rank + idx + offsetOfThisBlock + channelOutDataOffset / sizeof(int4),
                                    data);
       }
     }
-    /*if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
       outChannels[threadIdx.x].signal();
       outChannels[threadIdx.x].wait();
     }
-    __syncthreads();*/
+    __syncthreads();
 
     offsetOfThisBlock += nInt4PerChunk;
   }
@@ -366,7 +366,7 @@ __global__ void __launch_bounds__(512, 1)
         data = add_vectors<T>(val, data);
       }
       resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock] = data;
-    }
+    /*}
 
     if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
       outChannels[threadIdx.x].signal();
@@ -374,20 +374,26 @@ __global__ void __launch_bounds__(512, 1)
     }
     __syncthreads();
 
-    for (size_t idx = threadIdx.x; idx < restNInt4; idx += blockDim.x) {
-      int4 data = resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
+    for (size_t idx = threadIdx.x; idx < restNInt4; idx += blockDim.x) {*/
+      //data = resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
       for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
         outChannels[peerIdx].write(nInt4PerRank * rank + idx + offsetOfThisBlock + channelOutDataOffset / sizeof(int4),
                                    data);
       }
     }
+
+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+      outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();
+    }
+    __syncthreads();
   }
 
-  if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+  /*if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
       outChannels[threadIdx.x].signal();
       outChannels[threadIdx.x].wait();
   }
-  __syncthreads();
+  __syncthreads();*/
 
 }
 
@@ -664,19 +670,19 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
                                                          flag++);
   } else {
 
-    if (worldSize == NRANKS_PER_NODE && (sizeof(T) * nelems < (1 << 30))) {
+    /*if (worldSize == NRANKS_PER_NODE && (sizeof(T) * nelems < (1 << 30))) {
 	int nBlocks = 5 * (nRanksPerNode - 1);
         int nThreadsPerBlock = 1024;
 	allreduce10<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smScrChannels, smOutChannels,
                                                          channelOutOffset, channelScratchOffset, rank, nRanksPerNode,
                                                          worldSize, nelems);
-    } else {
+    } else {*/
     	int nBlocks = 5 * (nRanksPerNode - 1);
     	int nThreadsPerBlock = 512;
     	allreduce8<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels,
                                                          channelOutOffset, channelScratchOffset, rank, nRanksPerNode,
     	                                                    worldSize, nelems);
-    }
+    //}
     /*int nBlocks = 32;
     int nThreadsPerBlock = 1024;
     allreduce9<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels, channelInOffset,
