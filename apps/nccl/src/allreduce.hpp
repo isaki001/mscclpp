@@ -532,11 +532,10 @@ __global__ void __launch_bounds__(1024, 1)
       scratch4[nInt4PerRank * localRank + idx + offsetOfThisBlock] = data;
     }
    
-    //deviceSyncer.sync(gridDim.x);
     
     if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-      outChannels[threadIdx.x].signal();
-      outChannels[threadIdx.x].wait();
+      scrChannels[threadIdx.x].signal();
+      scrChannels[threadIdx.x].wait();
     }
     __syncthreads();
 
@@ -550,7 +549,7 @@ __global__ void __launch_bounds__(1024, 1)
       } else {
         peerIdx = rank - NRANKS1_PER_NODE;
       }
-      int4 val = scrChannels[peerIdx].read<int4>(nInt4PerRank  * localRank + offsetOfThisBlock + idx);
+      int4 val = scrChannels[peerIdx].read<int4>(nInt4PerRank  * localRank + offsetOfThisBlock + idx + channelScratchOffset/sizeof(int4));
       data = add_vectors<T>(val, data);
 
       resultBuff4[nInt4PerRank * localRank + idx + offsetOfThisBlock] = data;
@@ -600,8 +599,8 @@ __global__ void __launch_bounds__(1024, 1)
     }
 
     if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-      outChannels[threadIdx.x].signal();
-      outChannels[threadIdx.x].wait();
+      scrChannels[threadIdx.x].signal();
+      scrChannels[threadIdx.x].wait();
     }
     __syncthreads();
 
@@ -615,7 +614,7 @@ __global__ void __launch_bounds__(1024, 1)
       } else {
         peerIdx = rank - NRANKS1_PER_NODE;
       }
-      int4 val = scrChannels[peerIdx].read<int4>(nInt4PerRank  * localRank + offsetOfThisBlock + idx);
+      int4 val = scrChannels[peerIdx].read<int4>(nInt4PerRank  * localRank + offsetOfThisBlock + idx + channelScratchOffset/sizeof(int4));
       data = add_vectors<T>(val, data);
 
       resultBuff4[nInt4PerRank * localRank + idx + offsetOfThisBlock] = data;
