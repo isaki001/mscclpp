@@ -266,7 +266,7 @@ __global__ void __launch_bounds__(1024, 1)
 
 template <typename T>
 __global__ void __launch_bounds__(512, 1)
-    allreduce8(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels,
+    allreduce8Read(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels,
                mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels, size_t channelOutDataOffset,
                size_t channelScratchOffset, int rank, int nRanksPerNode, int worldSize, size_t nelems) {
   const int nPeer = nRanksPerNode - 1;
@@ -328,16 +328,7 @@ __global__ void __launch_bounds__(512, 1)
         data = add_vectors<T>(val, data);
       }
       resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock] = data;
-    /*}
-
-    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-      outChannels[threadIdx.x].signal();
-      outChannels[threadIdx.x].wait();
-    }
-    __syncthreads();
-
-    for (size_t idx = threadIdx.x; idx < nInt4PerChunk; idx += blockDim.x) {*/
-      //int4 data = resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
+      
       for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
         outChannels[peerIdx].write(nInt4PerRank * rank + idx + offsetOfThisBlock + channelOutDataOffset / sizeof(int4),
                                    data);
@@ -366,16 +357,7 @@ __global__ void __launch_bounds__(512, 1)
         data = add_vectors<T>(val, data);
       }
       resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock] = data;
-    /*}
 
-    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-      outChannels[threadIdx.x].signal();
-      outChannels[threadIdx.x].wait();
-    }
-    __syncthreads();
-
-    for (size_t idx = threadIdx.x; idx < restNInt4; idx += blockDim.x) {*/
-      //data = resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
       for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
         outChannels[peerIdx].write(nInt4PerRank * rank + idx + offsetOfThisBlock + channelOutDataOffset / sizeof(int4),
                                    data);
@@ -389,74 +371,131 @@ __global__ void __launch_bounds__(512, 1)
     __syncthreads();
   }
 
-  /*if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-      outChannels[threadIdx.x].signal();
-      outChannels[threadIdx.x].wait();
-  }
-  __syncthreads();*/
-
 }
 
+
 template <typename T>
-__global__ void __launch_bounds__(1024, 1)
-    allreduce9(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels, 
-	mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels, size_t channelDataOffset, size_t channelScratchOffset, 
-	size_t channelOutOffset, int rank, int nRanksPerNode, int worldSize, size_t nelems, uint32_t flag) {
+__global__ void __launch_bounds__(512, 1)
+    allreduce8(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels,
+               mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels, size_t channelOutDataOffset,
+               size_t channelScratchOffset, int rank, int nRanksPerNode, int worldSize, size_t nelems) {
+  const int nPeer = nRanksPerNode - 1;
+  const size_t chanOffset = nPeer * blockIdx.x;
+  // assume (nelems * sizeof(T)) is divisible by (16 * worldSize)
+  const size_t nInt4 = nelems * sizeof(T) / sizeof(int4);
+  const size_t nInt4PerRank = nInt4 / worldSize;
+  auto smChans = smChannels + chanOffset;
+  auto smOutChans = smOutChannels + chanOffset;
 
-    if (worldSize != nRanksPerNode) return;
-    const int nPeers = nRanksPerNode - 1;
-    const int nelemsPerRank = nelems / worldSize;
-    const size_t nInt4 = nelems * sizeof(T) / sizeof(int4);
-    const size_t nInt4PerRank = nInt4 / worldSize;
+  int4* buff4 = reinterpret_cast<int4*>(buff);
+  int4* scratch4 = reinterpret_cast<int4*>((char*)scratch + channelScratchOffset);
+  int4* resultBuff4 = reinterpret_cast<int4*>(resultBuff);
 
-    const int nBlocksPerPeer = gridDim.x / nPeers;
-    const int localBlockIdx = blockIdx.x % nBlocksPerPeer;
-    const int peerIdx = blockIdx.x / nBlocksPerPeer;
-    const int remoteRank = peerIdx < rank ? peerIdx : peerIdx + 1;
+  // Distribute `nInt4PerRank` across all blocks with the unit size `unitNInt4`
+  constexpr size_t unitNInt4 = 512;
+  const size_t maxNInt4PerBlock =
+      (((nInt4PerRank + gridDim.x - 1) / gridDim.x) + unitNInt4 - 1) / unitNInt4 * unitNInt4;
+  size_t offsetOfThisBlock = maxNInt4PerBlock * blockIdx.x;
+  size_t nInt4OfThisBlock = maxNInt4PerBlock;
+  size_t nNeededBlocks = (nInt4PerRank + maxNInt4PerBlock - 1) / maxNInt4PerBlock;
+  constexpr size_t nInt4PerChunk = 1024 * 256 / sizeof(int4);  // 256KB
+  if (blockIdx.x >= nNeededBlocks) {
+    nInt4OfThisBlock = 0;
+  } else if (blockIdx.x == nNeededBlocks - 1) {
+    nInt4OfThisBlock = nInt4PerRank - maxNInt4PerBlock * (nNeededBlocks - 1);
+  }
+  const size_t nItrs = nInt4OfThisBlock / nInt4PerChunk;
+  const size_t restNInt4 = nInt4OfThisBlock % nInt4PerChunk;
+  const size_t chunkSizePerRank = nNeededBlocks * nInt4PerChunk;
+  const size_t blockOffset = nInt4PerChunk * blockIdx.x;
+  const size_t scratchChunkRankOffset = chunkSizePerRank * rank;
+  const size_t scratchBaseOffsetInt4 = channelScratchOffset / sizeof(int4);
 
-    const int tid = threadIdx.x + localBlockIdx * blockDim.x;
-    uint32_t* src = (uint32_t*)((char*)buff + rank * nelemsPerRank * sizeof(int));
-    uint32_t* dst = (uint32_t*)((char*)resultBuff + rank * nelemsPerRank * sizeof(int));
+   __shared__ mscclpp::DeviceHandle<mscclpp::SmChannel> channels[NRANKS_PER_NODE - 1];
+  __shared__ mscclpp::DeviceHandle<mscclpp::SmChannel> outChannels[NRANKS_PER_NODE - 1];
+  const int lid = threadIdx.x % WARP_SIZE;
+  if (lid < nPeer) {
+    channels[lid] = smChans[lid];
+    outChannels[lid] = smOutChans[lid];
+  }
+  __syncwarp();
 
-    // Put channels into shared memory, read channel info from global memory is unexpectable slow.
-    __shared__ mscclpp::DeviceHandle<mscclpp::SmChannel> channels[NRANKS_PER_NODE - 1];
-    __shared__ mscclpp::DeviceHandle<mscclpp::SmChannel> outChannels[NRANKS_PER_NODE - 1];
-    const int lid = tid % WARP_SIZE;
-    if (lid < nPeers) {
-    	channels[lid] = smChannels[lid];
-    	outChannels[lid] = smOutChannels[lid];
+  // we can use double buffering to hide synchronization overhead
+  for (size_t itr = 0; itr < nItrs; itr++) {
+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+      outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();
     }
-    __syncwarp();
-
-    const int tid1 = threadIdx.x + blockIdx.x * blockDim.x;
-
-    if (tid1 < nPeers) {
-    	channels[tid1].signal();
-    	outChannels[tid1].signal();
-    }
-    const int waitStart = gridDim.x * blockDim.x - nPeers;
-    if (tid1 >= waitStart && tid1 < (int)(gridDim.x * blockDim.x)) {
-    	channels[tid1 - waitStart].wait();
-    	outChannels[tid1 - waitStart].wait();
+    __syncthreads();
+    // Starts allgather
+    for (size_t idx = threadIdx.x; idx < nInt4PerChunk; idx += blockDim.x) {
+      for (int i = 0; i < nPeer; i++) {
+        const int peerIdx = (i + blockIdx.x) % nPeer;
+        const int remoteRank = (peerIdx < rank) ? peerIdx : peerIdx + 1;
+        int4 val = buff4[nInt4PerRank * remoteRank + idx + offsetOfThisBlock];
+        channels[peerIdx].write(scratchBaseOffsetInt4 + scratchChunkRankOffset + blockOffset + idx, val);
+      }
     }
 
-    deviceSyncer.sync(gridDim.x);
-
-    for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < nelemsPerRank; idx += blockDim.x * gridDim.x) {
-    	uint32_t data = 0;
-    	for (int index = 0; index < nPeers; index++) {
-      		const int remoteRank = index < rank ? index : index + 1;
-      		uint32_t val = channels[index].read<uint32_t>(nelemsPerRank * rank + channelDataOffset/sizeof(int) + idx);
-      		data = add_vectors<T>(val, data);
-    	}
-    	data = add_vectors<T>(data, src[idx]);
-    	dst[idx] = data;
-    	for (int index = 0; index < nPeers; index++) {
-      		outChannels[index].write<uint32_t>(nelemsPerRank * rank + channelOutOffset/sizeof(int) + idx, data);
-    	}
+    /// Starts reduce-scatter
+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+      outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();
     }
-  
- }
+    __syncthreads();
+
+    for (size_t idx = threadIdx.x; idx < nInt4PerChunk; idx += blockDim.x) {
+      int4 data = buff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
+      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
+        const int remoteRank = (peerIdx < rank) ? peerIdx : peerIdx + 1;
+        int4 val = scratch4[chunkSizePerRank * remoteRank + blockOffset + idx];
+        data = add_vectors<T>(val, data);
+      }
+      resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock] = data;
+      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
+        outChannels[peerIdx].write(nInt4PerRank * rank + idx + offsetOfThisBlock + channelOutDataOffset / sizeof(int4),
+                                   data);
+      }
+    }
+    offsetOfThisBlock += nInt4PerChunk;
+  }
+
+  if (restNInt4 > 0) {
+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+      outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();
+    }
+    __syncthreads();
+    for (size_t idx = threadIdx.x; idx < restNInt4; idx += blockDim.x) {
+      for (int i = 0; i < nPeer; i++) {
+        const int peerIdx = (i + blockIdx.x) % nPeer;
+        const int remoteRank = (peerIdx < rank) ? peerIdx : peerIdx + 1;
+        int4 val = buff4[nInt4PerRank * remoteRank + idx + offsetOfThisBlock];
+        channels[peerIdx].write(scratchBaseOffsetInt4 + scratchChunkRankOffset + blockOffset + idx, val);
+      }
+    }
+
+    if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
+      outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();
+    }
+    __syncthreads();
+
+    for (size_t idx = threadIdx.x; idx < restNInt4; idx += blockDim.x) {
+      int4 data = buff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
+      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
+        const int remoteRank = (peerIdx < rank) ? peerIdx : peerIdx + 1;
+        int4 val = scratch4[chunkSizePerRank * remoteRank + blockOffset + idx];
+        data = add_vectors<T>(val, data);
+      }
+      resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock] = data;
+      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
+        outChannels[peerIdx].write(nInt4PerRank * rank + idx + offsetOfThisBlock + channelOutDataOffset / sizeof(int4),
+                                   data);
+      }
+    }
+  }
+}
 
 template <typename T>
 __global__ void __launch_bounds__(1024, 1)
@@ -676,19 +715,19 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
                                                          flag++);
   } else {
 
-    if (worldSize == NRANKS_PER_NODE && (sizeof(T) * nelems < (1 << 30))) {
+    /*if (worldSize == NRANKS_PER_NODE && (sizeof(T) * nelems < (1 << 30))) {
 	int nBlocks = 5 * (nRanksPerNode - 1);
         int nThreadsPerBlock = 512;
 	allreduce10<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smScrChannels, smOutChannels,
                                                          channelOutOffset, channelScratchOffset, rank, nRanksPerNode,
                                                          worldSize, nelems);
-    } else {
+    } else {*/
     	int nBlocks = 5 * (nRanksPerNode - 1);
     	int nThreadsPerBlock = 512;
-    	allreduce8<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels,
+    	allreduce8Read<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels,
                                                          channelOutOffset, channelScratchOffset, rank, nRanksPerNode,
     	                                                    worldSize, nelems);
-    }
+    //}
     /*int nBlocks = 32;
     int nThreadsPerBlock = 1024;
     allreduce9<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels, channelInOffset,
