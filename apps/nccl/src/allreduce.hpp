@@ -393,24 +393,26 @@ cudaError_t allreduce(T* buff, T* scratch, T* resultBuff, mscclpp::DeviceHandle<
                       size_t nelems, cudaStream_t stream) {
   static uint32_t flag = 1;
 
+  nRanksPerNode = (worldSize < nRanksPerNode) ? worldSize : nRanksPerNode;
+
   if (sizeof(T) * nelems < worldSize * sizeof(int)) {
-    int nBlocks = 7;
+    int nBlocks = nRanksPerNode - 1;
     int nThreadsPerBlock = 32;
     allreduceAllToAll<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, channelInOffset,
                                                                 channelScratchOffset, rank, nRanksPerNode, worldSize,
                                                                 nelems, flag++);
   } else if (sizeof(T) * nelems <= (1 << 20)) {
-    int nBlocks = 28;
+    int nBlocks = 4*(nRanksPerNode - 1);
     int nThreadsPerBlock = 1024;
     if (nelems >= 8192) {
-      nBlocks = 35;
-      nThreadsPerBlock = (nelems <= 76800) ? 512 : 1024;
+	nBlocks = 8*(nRanksPerNode - 1);
+      	nThreadsPerBlock = (nelems <= 76800) ? 512 : 1024;
     }
     allreduce7<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, channelInOffset,
                                                          channelScratchOffset, rank, nRanksPerNode, worldSize, nelems,
                                                          flag++);
   } else {
-    int nBlocks = 35;
+    int nBlocks = 5*(nRanksPerNode - 1);
     int nThreadsPerBlock = 512;
     allreduce8<<<nBlocks, nThreadsPerBlock, 0, stream>>>(buff, scratch, resultBuff, smChannels, smOutChannels,
                                                          channelOutOffset, channelScratchOffset, rank, nRanksPerNode,
