@@ -315,8 +315,10 @@ __global__ void __launch_bounds__(512, 1)
   // we can use double buffering to hide synchronization overhead
   for (size_t itr = 0; itr < nItrs; itr++) {
     if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-      outChannels[threadIdx.x].signal();
-      outChannels[threadIdx.x].wait();
+      /*outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();*/
+      channels[threadIdx.x].signal();
+      channels[threadIdx.x].wait();
     }
     __syncthreads();
 
@@ -344,8 +346,11 @@ __global__ void __launch_bounds__(512, 1)
   }
   if (restNInt4 > 0) {
     if (threadIdx.x < static_cast<uint32_t>(nPeer)) {
-      outChannels[threadIdx.x].signal();
-      outChannels[threadIdx.x].wait();
+      /*outChannels[threadIdx.x].signal();
+      outChannels[threadIdx.x].wait();*/
+      channels[threadIdx.x].signal();
+      channels[threadIdx.x].wait();
+
     }
     __syncthreads();
 
