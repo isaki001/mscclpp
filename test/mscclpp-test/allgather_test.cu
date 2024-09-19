@@ -20,7 +20,8 @@ constexpr uint64_t MAGIC = 0xdeadbeef;
 
 template <class T>
 using DeviceHandle = mscclpp::DeviceHandle<T>;
-__constant__ DeviceHandle<mscclpp::SimpleProxyChannel> constProxyChans[16];
+__constant__ DeviceHandle<mscclpp::SimpleProxyChannel> constProxyChans[32];
+
 __constant__ DeviceHandle<mscclpp::ProxyChannel> constRawProxyChan[16];
 
 __constant__ DeviceHandle<mscclpp::SmChannel> constSmChans[512];
@@ -83,45 +84,22 @@ __device__ void localAllGatherSm(int rank, int nRanksPerNode, int startRankChunk
                                  uint64_t rankChunkSize, uint64_t size, size_t nBlocks) {
   if (nRanksPerNode == 1) return;
   if (blockIdx.x >= nBlocks) return;
-  const size_t nPeer = nRanksPerNode - 1;
+  const size_t nPeer = nRanksPerNode;
+
   const size_t peerIdx = blockIdx.x % nPeer;
-  const size_t nBlockForThisPeer = nBlocks / nPeer + (nBlocks % nPeer > peerIdx ? 1 : 0);
+  
+  
+
   const size_t peerLocalBlockIdx = blockIdx.x / nPeer;
-  const size_t rankLocalIndex = rank % nRanksPerNode;
-  const int remoteRankLocalIndex = (peerIdx < rankLocalIndex ? peerIdx : peerIdx + 1);
-
-  // Split the data into chunks for aligned data access. Ignore the remainder here and let the last block handle it.
-  constexpr size_t chunkBytes = 128;  // heuristic value
-  const size_t nChunk = size / chunkBytes;
-  const size_t nMinChunkPerBlock = nChunk / nBlockForThisPeer;
-  const size_t nRemainderChunk = nChunk % nBlockForThisPeer;
-
-  // Distribute chunks to blocks
-  size_t nChunkForThisBlock;
-  size_t offsetForThisBlock;
-  if (peerLocalBlockIdx < nRemainderChunk) {
-    nChunkForThisBlock = nMinChunkPerBlock + 1;
-    offsetForThisBlock = (nMinChunkPerBlock + 1) * peerLocalBlockIdx;
-  } else {
-    nChunkForThisBlock = nMinChunkPerBlock;
-    offsetForThisBlock =
-        (nMinChunkPerBlock + 1) * nRemainderChunk + (peerLocalBlockIdx - nRemainderChunk) * nMinChunkPerBlock;
-  }
-  offsetForThisBlock *= chunkBytes;
-
-  // Calculate the size of the data for this block
-  size_t sizeForThisBlock = nChunkForThisBlock * chunkBytes;
-  const size_t lastChunkSize = size - nChunk * chunkBytes;
-  if (lastChunkSize > 0 && peerLocalBlockIdx == nBlockForThisPeer - 1) {
-    sizeForThisBlock += lastChunkSize;
-  }
   if (threadIdx.x == 0 && peerLocalBlockIdx == 0) {
     constSmChans[peerIdx].signal();
     constSmChans[peerIdx].wait();
   }
   deviceSyncer.sync(nBlocks);
-  size_t offset = rankChunkSize * (startRankChunkIndex + remoteRankLocalIndex) + offsetInRankChunk;
-  constSmChans[peerIdx].get(offset + offsetForThisBlock, sizeForThisBlock, threadIdx.x, blockDim.x);
+  if (peerIdx == rank) return;
+
+  size_t offset = (peerLocalBlockIdx*nRanksPerNode + (rank % nRanksPerNode)) * rankChunkSize;
+  constSmChans[peerIdx].put<16, false>(offset, rankChunkSize, threadIdx.x, blockDim.x);
 }
 
 __global__ void allgather1(int rank, int nRanksPerNode, size_t nelemsPerGPU) {
@@ -255,9 +233,11 @@ __global__ void allgather4(int rank, int worldSize, int nRanksPerNode, size_t ne
   size_t step1Bytes = nelemsPerGPU * sizeof(int);
   int cur_count = nelemsPerGPU;
   int pof2 = 1;
+  int offset = 0;
 
-  printf("Num_nodes = %d\n", num_nodes);
+
   if (num_nodes > 1) {
+
    while (pof2 <= num_nodes / 2) {
         peer_src = (rank + pof2*nRanksPerNode) % worldSize;
         peer_dst = (rank - pof2*nRanksPerNode + worldSize) % worldSize;
@@ -265,88 +245,47 @@ __global__ void allgather4(int rank, int worldSize, int nRanksPerNode, size_t ne
         DeviceHandle<mscclpp::SimpleProxyChannel>& proxyChan_dst = constProxyChans[peer_dst];
 
         if (threadIdx.x == 0 && blockIdx.x == 0) {
-		printf("Doing Put\n");
-                proxyChan_dst.putWithSignal(peer_dst*nelemsPerGPU*sizeof(int) + cur_count*sizeof(int), rank*nelemsPerGPU, cur_count*sizeof(int));
+                proxyChan_dst.putWithSignal(peer_dst*nelemsPerGPU*sizeof(int) + cur_count*sizeof(int), rank*nelemsPerGPU*sizeof(int), cur_count*sizeof(int));
+
                 proxyChan_src.wait();
-                proxyChan_src.flush();
                 proxyChan_dst.flush();
         }
-
-        deviceSyncer.sync(nBlocksForLocalAllGather);
-		printf("Back from Put\n");
 
 	cur_count *= 2;
         pof2 *= 2;
   }
+  deviceSyncer.sync(nBlocksForLocalAllGather);
+
 	int shift_by = rank / nRanksPerNode;
-	int target_offset = rank % nRanksPerNode;
 
-	if (blockIdx.x == 0) {
+	if (blockIdx.x > 0 && blockIdx.x <= (num_nodes - 1)) {
+
 		int tid = threadIdx.x + blockIdx.x * blockDim.x;			
-		for (int i = 0; i < shift_by; i++) {
-			int src_offset = (rank + (num_nodes - shift_by + i)) * nelemsPerGPU * sizeof(int);
+		if (shift_by == 0) {
+			int target_offset = blockIdx.x * nRanksPerNode + rank;
+			int src_offset = (rank + blockIdx.x) * nelemsPerGPU * sizeof(int);
+				
+			constSmChans[rank].put<16, false>(target_offset*nelemsPerGPU*sizeof(int), src_offset, nelemsPerGPU*sizeof(int), threadIdx.x, blockDim.x);
+		} else {
+			int target_offset = (blockIdx.x * nRanksPerNode + rank);
 
-			//for (int i = tid; i < nelemsPerGPU; i+=) {
-			constSmChans[rank].put<16, false>(target_offset*nelemsPerGPU*sizeof(int), src_offset, nelemsPerGPU*sizeof(int), tid, blockDim.x);			   
-			target_offset +=  nRanksPerNode;
-			//}
+			if (target_offset >= worldSize)
+				target_offset = (blockIdx.x * nRanksPerNode + rank) % worldSize;
+
+			int src_offset = (rank + blockIdx.x) * nelemsPerGPU * sizeof(int);
+
+			constSmChans[rank].put<16, false>(target_offset*nelemsPerGPU*sizeof(int), src_offset, nelemsPerGPU*sizeof(int), threadIdx.x, blockDim.x);			   
 		}
 
-    	/*hipMemcpy(((char*)recvbuf + sizeof(float)*N*offset), ((char*)tmpbuf + (num_nodes - shift_by + i)*N*sizeof(float)), sizeof(float) * N, hipMemcpyDeviceToDevice);
-
-	offset += RANKSPERNODE;*/
     	}
-
+        deviceSyncer.sync(nBlocksForLocalAllGather);
+	localAllGatherSm(rank, nRanksPerNode, 0, 0, rankChunkSize, rankChunkSize,
+                   nBlocksForLocalAllGather);
 		
   } else {
   	localAllGatherSm(rank, nRanksPerNode, 0, 0, rankChunkSize, rankChunkSize,
                    nBlocksForLocalAllGather);
   }
-
-
-  /*int pipelineSize = 3;
-  int peerRank = (rank + nRanksPerNode) % worldSize;
-  int peerNodeId = peerRank / nRanksPerNode;
-  int peer = (peerRank < rank) ? peerRank : peerRank - 1;
-  DeviceHandle<mscclpp::SimpleProxyChannel>& proxyChan = constProxyChans[peer];
-  const size_t nBlocksForLocalAllGather = gridDim.x;
-  const size_t rankChunkSize = nelemsPerGPU * sizeof(int);
-  const int startRankIndexInLocalNode = (rank / nRanksPerNode) * nRanksPerNode;
-  const int startRankIndexInPeerNode = (peerRank / nRanksPerNode) * nRanksPerNode;
-
-  if (peerNodeId == rank / nRanksPerNode) {
-    localAllGatherSm(rank, nRanksPerNode, 0, 0, rankChunkSize, rankChunkSize, nBlocksForLocalAllGather);
-    return;
-  }
-
-  constexpr size_t alignment = 128;
-  size_t step1Bytes = (nelemsPerGPU * (pipelineSize - 1)) / pipelineSize * sizeof(int);
-  step1Bytes = step1Bytes / alignment * alignment;
-  const size_t step2Bytes = nelemsPerGPU * sizeof(int) - step1Bytes;
-
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    proxyChan.putWithSignal(rank * nelemsPerGPU * sizeof(int), step1Bytes);
-  }
-  localAllGatherSm(rank, nRanksPerNode, startRankIndexInLocalNode, 0, rankChunkSize, rankChunkSize,
-                   nBlocksForLocalAllGather);
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    proxyChan.wait();
-    proxyChan.flush();
-  }
-  deviceSyncer.sync(nBlocksForLocalAllGather);
-  
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    proxyChan.putWithSignal(rank * nelemsPerGPU * sizeof(int) + step1Bytes, step2Bytes);
-  }
-  localAllGatherSm(rank, nRanksPerNode, startRankIndexInPeerNode, 0, rankChunkSize, step1Bytes,
-                   nBlocksForLocalAllGather);
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    proxyChan.wait();
-    proxyChan.flush();
-  }
-  deviceSyncer.sync(nBlocksForLocalAllGather);
-  localAllGatherSm(rank, nRanksPerNode, startRankIndexInPeerNode, step1Bytes, rankChunkSize, step2Bytes,
-                   nBlocksForLocalAllGather);*/
 
 }
 
@@ -785,10 +724,14 @@ void AllGatherTestColl::runColl(const TestArgs& args, cudaStream_t stream) {
   const int rank = args.rank;
   const int nRanksPerNode = args.nRanksPerNode;
   const int kernelNum = args.kernelNum;
+  int num_nodes = worldSize / nRanksPerNode;
+
   int nBlocks;
   int nThreads;
   if (kernelNum == 4) {
-    nBlocks = 21;
+    //nBlocks = 21;
+	  //printf("num_nodes = %d, nRanksPerNode = %d\n", num_nodes, nRanksPerNode);
+    nBlocks = num_nodes * nRanksPerNode;
     nThreads = 1024;
   } else if (kernelNum == 5) {
     nBlocks = 24;
@@ -879,7 +822,7 @@ std::vector<KernelRestriction> AllGatherTestColl::getKernelRestrictions() {
           {1, "allgather1", false, 1, 4 * worldSize_},
           {2, "allgather2", true, 3, 4 * worldSize_},
           {3, "allgather3", true, 1, 4 * worldSize_},
-          {4, "allgather4", true, 3, 4 * worldSize_ /*use ulong2 to transfer data*/},
+          {4, "allgather4", true, 1, 4 * worldSize_ /*use ulong2 to transfer data*/},
           {5, "allgather5", false, 1, 16 * worldSize_ /*use ulong2 to transfer data*/},
           {6, "allgather6", false, 1, 16 * worldSize_ /*use ulong2 to transfer data*/},
           {7, "allgather7", false, 1, 16 * worldSize_ /*use ulong2 to transfer data*/},
@@ -916,10 +859,14 @@ class AllGatherTestEngine : public BaseTestEngine {
 AllGatherTestEngine::AllGatherTestEngine(const TestArgs& args) : BaseTestEngine(args, "allgather") {}
 
 void AllGatherTestEngine::allocateBuffer() {
-  sendBuff_ = mscclpp::allocExtSharedCuda<int>(args_.maxBytes / sizeof(int));
+  sendBuff_ = mscclpp::allocExtSharedCuda<int>(2*args_.maxBytes / sizeof(int));
   tmpBuff_ = mscclpp::allocExtSharedCuda<int>(args_.maxBytes / sizeof(int));
 
   expectedBuff_ = std::shared_ptr<int[]>(new int[args_.maxBytes / sizeof(int)]);
+
+  if (args_.kernelNum == 4) {
+	const size_t nPacket = (2*args_.maxBytes + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+  }
   if (args_.kernelNum == 7 || args_.kernelNum == 8) {
     const size_t nPacket = (args_.maxBytes + sizeof(uint64_t) - 1) / sizeof(uint64_t);
     // 2x for double-buffering, scratchBuff used to store original data and reduced results
@@ -931,9 +878,7 @@ void AllGatherTestEngine::allocateBuffer() {
 void AllGatherTestEngine::setupConnections() {
   std::vector<DeviceHandle<mscclpp::SimpleProxyChannel>> devProxyChannels;
   if (!isUsingHostOffload(args_.kernelNum)) {
-    printf("Not host offload\n");
     setupMeshConnections(devProxyChannels, sendBuff_.get(), args_.maxBytes);
-    //setupMeshConnections(devProxyChannels, tmpBuff_.get(), args_.maxBytes);
 
     if (devProxyChannels.size() > sizeof(constProxyChans) / sizeof(DeviceHandle<mscclpp::SimpleProxyChannel>)) {
       std::runtime_error("unexpected error");

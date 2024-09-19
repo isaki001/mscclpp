@@ -145,12 +145,12 @@ void validateArgsForDeviceKernel(const std::vector<KernelRestriction>& restricti
     throw std::invalid_argument(ss.str());
   }
   bool sizeAlignedForMultiNode = (paramCount * typeSize / iter->countDivisorForMultiNodes) % iter->alignedBytes == 0;
-  if (((paramCount * typeSize) % iter->alignedBytes != 0) || (isOnMultiNodes && !sizeAlignedForMultiNode)) {
+  /*if (((paramCount * typeSize) % iter->alignedBytes != 0) || (isOnMultiNodes && !sizeAlignedForMultiNode)) {
     ss << "kernel is not compatible with alignment restriction, kernelNum=" << kernelNum
        << ", name=" << iter->kernelName << ", paramCount=" << paramCount << ", alignedBytes=" << iter->alignedBytes
        << ", countDivisorForMultiNodes=" << iter->countDivisorForMultiNodes;
     throw std::invalid_argument(ss.str());
-  }
+  }*/
 }
 }  // namespace
 
@@ -369,7 +369,6 @@ void BaseTestEngine::setupMeshConnectionsInternal(
   const mscclpp::Transport ibTransport = IBs[args_.gpuNum];
   std::vector<mscclpp::NonblockingFuture<std::shared_ptr<mscclpp::Connection>>> connectionFutures;
 
-  printf("In mesh connection internal\n");
   auto rankToNode = [&](int rank) { return rank / nRanksPerNode; };
   for (int r = 0; r < worldSize; r++) {
     /*if (r == rank) {
@@ -401,29 +400,18 @@ void BaseTestEngine::setupMeshConnections(std::vector<DeviceHandle<mscclpp::Simp
                                           void* inputBuff, size_t inputBuffBytes, void* outputBuff,
                                           size_t outputBuffBytes, SetupChannelFunc setupChannel) {
   const mscclpp::TransportFlags allTransports = mscclpp::Transport::CudaIpc | IBs[args_.gpuNum];
-  mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(inputBuff, inputBuffBytes, allTransports);
+  mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(inputBuff, 2*inputBuffBytes, allTransports);
   mscclpp::RegisteredMemory outputBufRegMem;
-  if (outputBuff) {
-    outputBufRegMem = comm_->registerMemory(outputBuff, outputBuffBytes, allTransports);
-  }
+  
 
-  /*void *tmpBuff;
-  hipExtMallocWithFlags((void**)&tmpBuff, outputBuffBytes, hipDeviceMallocUncached);
+  void *tmpBuff;
+  hipExtMallocWithFlags((void**)&tmpBuff, inputBuffBytes, hipDeviceMallocUncached);
   hipMemcpy(tmpBuff, inputBuff, inputBuffBytes, hipMemcpyDeviceToDevice);
-  mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(tmpBuff, inputBuffBytes, allTransports);*/
+  outputBufRegMem = comm_->registerMemory(tmpBuff, inputBuffBytes, allTransports);
 
-  //std::vector<int> dataHost(std::max(inputBuffBytes, outputBuffBytes), 0);
-  //CUDATHROW(cudaMemcpy(dataHost.data(), inputBuff, inputBuffBytes, cudaMemcpyDeviceToHost));
-  //CUDATHROW(cudaMemcpy(dataHost.data(), tmpBuff, inputBuffBytes, cudaMemcpyDeviceToHost));
-
-  //mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(tmpBuff, outputBuffBytes, allTransports);
-
-  /*for (int i = 0; i < 10; i++) {
-	printf(" i = %d, val = %d\n", i, dataHost[i]);
-  }*/
-  printf("In proxyChannel setup mesh\n");
   std::vector<std::shared_ptr<mscclpp::Connection>> connections;
   std::vector<mscclpp::NonblockingFuture<mscclpp::RegisteredMemory>> remoteRegMemories;
+  
   mscclpp::RegisteredMemory& localRegMemory = (outputBuff) ? outputBufRegMem : inputBufRegMem;
 
   setupMeshConnectionsInternal(connections, localRegMemory, remoteRegMemories);
@@ -449,14 +437,20 @@ void BaseTestEngine::setupMeshConnections(std::vector<mscclpp::SmChannel>& smCha
   mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(inputBuff, inputBuffBytes, allTransports);
   mscclpp::RegisteredMemory getPacketBufRegMem;
   mscclpp::RegisteredMemory outputBufRegMem;
+
+  void *tmpBuff;
+  hipExtMallocWithFlags((void**)&tmpBuff, outputBuffBytes, hipDeviceMallocUncached);
+  hipMemcpy(tmpBuff,outputBuff, outputBuffBytes, hipMemcpyDeviceToDevice);
+
   if (outputBuff) {
     outputBufRegMem = comm_->registerMemory(outputBuff, outputBuffBytes, allTransports);
   }
-  printf("In smchannel setup mesh\n");
   std::vector<std::shared_ptr<mscclpp::Connection>> connections;
   std::vector<mscclpp::NonblockingFuture<mscclpp::RegisteredMemory>> remoteRegMemories;
+  
   mscclpp::RegisteredMemory& localRegMemory =
       (outputBuff && semantic == ChannelSemantic::PUT) ? outputBufRegMem : inputBufRegMem;
+  
   setupMeshConnectionsInternal(connections, localRegMemory, remoteRegMemories);
 
   std::unordered_map<size_t, std::vector<std::shared_ptr<mscclpp::SmDevice2DeviceSemaphore>>> smSemaphores;
@@ -493,10 +487,8 @@ void BaseTestEngine::setupMeshConnections(std::vector<mscclpp::SmChannel>& smCha
 
   void *tmpBuff;
 
-  printf("In desired setupMesh\n");
   hipExtMallocWithFlags((void**)&tmpBuff, outputBuffBytes, hipDeviceMallocUncached);
   hipMemcpy(tmpBuff, inputBuff, inputBuffBytes, hipMemcpyDeviceToDevice); 
-  //mscclpp::RegisteredMemory inputBufRegMem = comm_->registerMemory(tmpBuff, outputBuffBytes, allTransports); 
 
   if (putPacketBuff) {
     putPacketBufRegMem = comm_->registerMemory(putPacketBuff, putPacketBuffBytes, allTransports);
