@@ -13,6 +13,7 @@
 
 constexpr int NRANKS1_PER_NODE = 4;
 constexpr int NRANKS_PER_NODE = 8;
+constexpr int NPEER = 7;
 
 constexpr int SCRATCH_SIZE = 12 * 2 * 1024 * 1024 * 70;  // double buffer * 35 thread-blocks * 8 ranks * 256KB = 70MB
 

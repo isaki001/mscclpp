@@ -310,7 +310,6 @@ __global__ void __launch_bounds__(512, 1)
   }
   __syncwarp();
 
-//  deviceSyncer.sync(gridDim.x);
 
   // we can use double buffering to hide synchronization overhead
   for (size_t itr = 0; itr < nItrs; itr++) {
@@ -324,14 +323,16 @@ __global__ void __launch_bounds__(512, 1)
 
     for (size_t idx = threadIdx.x; idx < nInt4PerChunk; idx += blockDim.x) {
       int4 data = buff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
-      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
+#pragma unroll
+      for (int peerIdx = 0; peerIdx < NPEER; peerIdx++) {
         const int remoteRank = (peerIdx < rank) ? peerIdx : peerIdx + 1;
         int4 val = channels[peerIdx].read<int4>(nInt4PerRank  * rank + offsetOfThisBlock + idx);;
         data = add_vectors<T>(val, data);
       }
       resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock] = data;
-      
-      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
+
+#pragma unroll
+      for (int peerIdx = 0; peerIdx < NPEER; peerIdx++) {
         outChannels[peerIdx].write(nInt4PerRank * rank + idx + offsetOfThisBlock + channelOutDataOffset / sizeof(int4),
                                    data);
       }
@@ -356,14 +357,15 @@ __global__ void __launch_bounds__(512, 1)
 
     for (size_t idx = threadIdx.x; idx < restNInt4; idx += blockDim.x) {
       int4 data = buff4[nInt4PerRank * rank + idx + offsetOfThisBlock];
-      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
+#pragma unroll
+      for (int peerIdx = 0; peerIdx < NPEER; peerIdx++) {
         const int remoteRank = (peerIdx < rank) ? peerIdx : peerIdx + 1;
         int4 val = channels[peerIdx].read<int4>(nInt4PerRank  * rank + offsetOfThisBlock + idx);;	
         data = add_vectors<T>(val, data);
       }
       resultBuff4[nInt4PerRank * rank + idx + offsetOfThisBlock] = data;
-
-      for (int peerIdx = 0; peerIdx < nPeer; peerIdx++) {
+#pragma unroll
+      for (int peerIdx = 0; peerIdx < NPEER; peerIdx++) {
         outChannels[peerIdx].write(nInt4PerRank * rank + idx + offsetOfThisBlock + channelOutDataOffset / sizeof(int4),
                                    data);
       }
