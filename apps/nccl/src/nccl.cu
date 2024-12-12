@@ -214,7 +214,7 @@ static ncclResult_t ncclAllReduceFallback(const void* sendbuff, void* recvbuff, 
   channelKey recvKey{(void*)recvBasePtr, recvBytes};
   mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels = nullptr;
   mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels = nullptr;
-
+  
   // Creating the channels
   if (count * ncclTypeSize(datatype) <= comm->largeMessageSizeBoundary) {
     auto sendIt = comm->channelScratchInfos.find(sendKey);
@@ -478,6 +478,7 @@ NCCL_API ncclResult_t ncclAllReduce(const void* sendbuff, void* recvbuff, size_t
   if (sendbuff == nullptr || recvbuff == nullptr || count == 0 || ncclTypeSize(datatype) == 0 || comm == nullptr)
     return ncclInvalidArgument;
 
+  //printf("In allreduce\n");
   // Declarating variables
   size_t bytes = count * ncclTypeSize(datatype);
   int rank = comm->comm->bootstrap()->getRank();
@@ -565,6 +566,60 @@ NCCL_API ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t
 
   return ncclSuccess;
 }
+
+NCCL_API ncclResult_t ncclCommRegister(ncclComm_t comm, void* buff, size_t size, void** handle) {
+  size_t buffBytes;
+  CUdeviceptr buffBasePtr;
+
+  MSCCLPP_CUTHROW(cuMemGetAddressRange(&buffBasePtr, &buffBytes, (CUdeviceptr)buff));
+  
+  size_t offsetIn = (char*)buff - (char*)buffBasePtr;
+  uint32_t scratchBuffIdx = (++(comm->buffFlag)) % comm->numScratchBuff;
+  size_t offsetScratch = (SCRATCH_SIZE / comm->numScratchBuff) * scratchBuffIdx;
+  int rank = comm->comm->bootstrap()->getRank();
+  channelKey buffKey{(void*)buffBasePtr, buffBytes};
+  mscclpp::DeviceHandle<mscclpp::SmChannel>* smChannels = nullptr;
+  mscclpp::DeviceHandle<mscclpp::SmChannel>* smOutChannels = nullptr;
+  std::vector<mscclpp::RegisteredMemory> remoteMemories;
+
+  // Creating the channels
+  if (size <= (1 << 20)) {
+    auto buffIt = comm->channelScratchInfos.find(buffKey);
+    if (buffIt == comm->channelScratchInfos.end()) {
+      std::vector<mscclpp::SmChannel> channels =
+          setupSmChannels(comm, comm->remoteScratchRegMemories, const_cast<void*>((void*)buffBasePtr));
+      ChannelInfo channelInfo{channels, setupSmChannelDeviceHandles(channels)};
+      buffIt = comm->channelScratchInfos.emplace(buffKey, channelInfo).first;
+    }
+    *handle = (void*) buffBasePtr;
+
+  } else {
+      auto buffIt = comm->channelScratchInfos.find(buffKey);
+      if (buffIt == comm->channelScratchInfos.end()) {
+      	std::vector<mscclpp::SmChannel> channels =
+          setupSmChannels(comm, comm->remoteScratchRegMemories, const_cast<void*>((void*)buffBasePtr));
+      	ChannelInfo channelInfo{channels, setupSmChannelDeviceHandles(channels)};
+      	buffIt = comm->channelScratchInfos.emplace(buffKey, channelInfo).first;
+      }
+      auto recvIt = comm->channelOutInfos.find(buffKey);
+      if (recvIt == comm->channelOutInfos.end()) {
+      	remoteMemories =
+          setupRemoteMemories(comm->comm, rank, (void*)buffBasePtr, buffBytes, mscclpp::Transport::CudaIpc);
+      	std::vector<mscclpp::SmChannel> outChannels =
+          setupSmChannels(comm, remoteMemories, const_cast<void*>((void*)buffBasePtr));
+      	ChannelInfo channelInfo{outChannels, setupSmChannelDeviceHandles(outChannels)};
+      	recvIt = comm->channelOutInfos.emplace(buffKey, channelInfo).first;
+      }
+  }
+  //printf("Registering done %zu\n", size);
+  return ncclSuccess;
+}
+
+NCCL_API ncclResult_t ncclCommDeregister(ncclComm_t comm, void* handle) {
+	handle = nullptr;
+	return ncclSuccess;
+}
+
 
 NCCL_API ncclResult_t ncclSend(const void*, size_t, ncclDataType_t, int, ncclComm_t, cudaStream_t) {
   // TODO: implement this function
